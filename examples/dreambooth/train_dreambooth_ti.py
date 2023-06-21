@@ -408,12 +408,13 @@ class DreamBoothDataset(Dataset):
                   instance_prompt = ""
                 else:
                   instance_prompt = pt
-            sys.stdout.write(" [0;32m" +instance_prompt[:45]+" [0m")
-            sys.stdout.flush()
+
 
         if self.token_map is not None:
             for token, value in self.token_map.items():
                 instance_prompt = instance_prompt.replace(token, value)
+        sys.stdout.write(" [0;32m" +instance_prompt[:45]+" [0m")
+        sys.stdout.flush()
 
         example["instance_images"] = self.image_transforms(instance_image)
         example["instance_prompt_ids"] = self.tokenizer(
