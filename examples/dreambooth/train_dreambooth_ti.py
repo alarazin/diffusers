@@ -815,11 +815,19 @@ def main():
                   inst =inst + "_step_" + str(global_step+1)
                   print(" [1;32mSAVING CHECKPOINT...")
                   if accelerator.is_main_process:
-                     pipeline = StableDiffusionPipeline.from_pretrained(
-                           args.pretrained_model_name_or_path,
-                           unet=accelerator.unwrap_model(unet),
-                           text_encoder=accelerator.unwrap_model(text_encoder),
-                     )               
+                     if args.add_embeddings:
+                        pipeline = StableDiffusionPipeline.from_pretrained(
+                            args.pretrained_model_name_or_path,
+                            unet=accelerator.unwrap_model(unet),
+                            text_encoder=accelerator.unwrap_model(text_encoder),
+                            tokenizer=tokenizer
+                        )      
+                     else:
+                        pipeline = StableDiffusionPipeline.from_pretrained(
+                            args.pretrained_model_name_or_path,
+                            unet=accelerator.unwrap_model(unet),
+                            text_encoder=accelerator.unwrap_model(text_encoder),
+                        )               
                      chkpth=args.Session_dir+"/"+inst+".ckpt"
                      if args.mixed_precision=="fp16":
                         save_stable_diffusion_checkpoint(unet.config.cross_attention_dim == 1024, chkpth, pipeline.text_encoder, pipeline.unet, None, 0, 0, torch.float16, pipeline.vae)
