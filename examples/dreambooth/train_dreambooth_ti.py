@@ -543,7 +543,9 @@ def main():
 
 
     # Load the tokenizer
-    if args.tokenizer_name:
+    if args.add_embeddings and os.path.exists(str(args.output_dir+"/tokenizer_trained")):
+        tokenizer = CLIPTokenizer.from_pretrained(args.output_dir, subfolder="tokenizer_trained")
+    elif args.tokenizer_name:
         tokenizer = CLIPTokenizer.from_pretrained(args.tokenizer_name)
     elif args.pretrained_model_name_or_path:
         tokenizer = CLIPTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer")
@@ -833,6 +835,7 @@ def main():
     if accelerator.is_main_process:
       if args.dump_only_text_encoder:
          txt_dir=args.output_dir + "/text_encoder_trained"
+         tokenizer_dir =args.output_dir + "/tokenizer_trained"
          if args.train_only_text_encoder:    
              if args.add_embeddings:
                 pipeline = StableDiffusionPipeline.from_pretrained(
@@ -850,6 +853,8 @@ def main():
          else:
              if not os.path.exists(txt_dir):
                os.mkdir(txt_dir)
+             if not os.path.exists(tokenizer_dir):
+               os.mkdir(tokenizer_dir)
 
              if args.add_embeddings:
                 pipeline = StableDiffusionPipeline.from_pretrained(
@@ -859,6 +864,7 @@ def main():
                     tokenizer=tokenizer
                 )
                 pipeline.text_encoder.save_pretrained(txt_dir)
+                pipeline.tokenizer.save_pretrained(tokenizer_dir)
              else:
                 pipeline = StableDiffusionPipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
