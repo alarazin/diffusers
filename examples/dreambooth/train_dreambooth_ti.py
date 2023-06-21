@@ -287,6 +287,13 @@ def parse_args():
         help="Add embeddings",
     )
 
+    parser.add_argument(
+        "--placeholder_token_at_data",
+        type=str,
+        default=None,
+        help="The prompt with identifier specifying the instance",
+    )
+
     parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
 
     args = parser.parse_args()
@@ -304,6 +311,14 @@ def parse_args():
             raise ValueError("You must specify prompt for class images.")
 
     return args
+
+if args.placeholder_token_at_data is not None:
+    tok, pat = args.placeholder_token_at_data.split("|")
+    token_map = {tok: pat}
+else:
+    token_map = None
+
+
 
 def apply_learned_embed_in_clip(
     learned_embeds,
@@ -392,11 +407,13 @@ class DreamBoothDataset(Dataset):
         class_prompt=None,
         size=512,
         center_crop=False,
+        token_map= None
     ):
         self.size = size
         self.center_crop = center_crop
         self.tokenizer = tokenizer
         self.image_captions_filename = None
+        self.token_map = token_map
 
         self.instance_data_root = Path(instance_data_root)
         if not self.instance_data_root.exists():
@@ -466,6 +483,9 @@ class DreamBoothDataset(Dataset):
             sys.stdout.write(" [0;32m" +instance_prompt[:45]+" [0m")
             sys.stdout.flush()
 
+        if self.token_map is not None:
+            for token, value in self.token_map.items():
+                instance_prompt = instance_prompt.replace(token, value)
 
         example["instance_images"] = self.image_transforms(instance_image)
         example["instance_prompt_ids"] = self.tokenizer(
