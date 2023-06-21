@@ -67,6 +67,7 @@ def apply_learned_embed_in_clip(
 
         # get the id for the token and assign the embeds
         token_id = tokenizer.convert_tokens_to_ids(token)
+        print('token_id:',token_id)
         text_encoder.get_input_embeddings().weight.data[token_id] = embeds
     return token
 
