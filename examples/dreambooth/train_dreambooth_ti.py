@@ -839,19 +839,31 @@ def main():
            
         accelerator.wait_for_everyone()
 
+    if not args.save_tokenizer and args.add_embeddings:
+        delete_learned_embeds = True
+        tokenizer = CLIPTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer")
+        text_encoder_resized = accelerator.unwrap_model(text_encoder).resize_token_embeddings(len(tokenizer))
+        print('Length of resized TE: ',len(text_encoder_resized.get_input_embeddings().weight.data))
     # Create the pipeline using using the trained modules and save it.
     if accelerator.is_main_process:
       if args.dump_only_text_encoder:
          txt_dir=args.output_dir + "/text_encoder_trained"
          tokenizer_dir =args.output_dir + "/tokenizer_trained"
          if args.train_only_text_encoder:    
-             if args.save_tokenizer:
+             if args.save_tokenizer and args.add_embeddings:
                 pipeline = StableDiffusionPipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
                     text_encoder=accelerator.unwrap_model(text_encoder),
                     tokenizer = tokenizer
                 )
-                pipeline.save_pretrained(args.output_dir) 
+                pipeline.save_pretrained(args.output_dir)
+             elif args.add_embeddings:
+                pipeline = StableDiffusionPipeline.from_pretrained(
+                args.pretrained_model_name_or_path,
+                text_encoder=text_encoder_resized,
+                )
+                pipeline.save_pretrained(args.output_dir)   
+                 
              else:        
                 pipeline = StableDiffusionPipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
@@ -861,10 +873,10 @@ def main():
          else:
              if not os.path.exists(txt_dir):
                os.mkdir(txt_dir)
-             if not os.path.exists(tokenizer_dir):
+             if not os.path.exists(tokenizer_dir) and args.save_tokenizer:
                os.mkdir(tokenizer_dir)
 
-             if args.save_tokenizer:
+             if args.save_tokenizer and args.add_embeddings:
                 pipeline = StableDiffusionPipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
                     unet=accelerator.unwrap_model(unet),
@@ -873,6 +885,15 @@ def main():
                 )
                 pipeline.text_encoder.save_pretrained(txt_dir)
                 pipeline.tokenizer.save_pretrained(tokenizer_dir)
+
+             elif args.add_embeddings:
+                pipeline = StableDiffusionPipeline.from_pretrained(
+                    args.pretrained_model_name_or_path,
+                    unet=accelerator.unwrap_model(unet),
+                    text_encoder=text_encoder_resized,
+                )
+                pipeline.text_encoder.save_pretrained(txt_dir)
+
              else:
                 pipeline = StableDiffusionPipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
@@ -882,12 +903,19 @@ def main():
                 pipeline.text_encoder.save_pretrained(txt_dir)
 
       elif args.train_only_unet:
-        if args.save_tokenizer:
+        if args.save_tokenizer and args.add_embeddings:
             pipeline = StableDiffusionPipeline.from_pretrained(
                 args.pretrained_model_name_or_path,
                 unet=accelerator.unwrap_model(unet),
                 text_encoder=accelerator.unwrap_model(text_encoder),
                 tokenizer=tokenizer
+            )
+            pipeline.save_pretrained(args.output_dir)
+        elif args.add_embeddings:
+            pipeline = StableDiffusionPipeline.from_pretrained(
+                args.pretrained_model_name_or_path,
+                unet=accelerator.unwrap_model(unet),
+                text_encoder=text_encoder_resized,
             )
             pipeline.save_pretrained(args.output_dir)
 
@@ -900,9 +928,12 @@ def main():
             pipeline.save_pretrained(args.output_dir)
 
         txt_dir=args.output_dir + "/text_encoder_trained"
+        tokenizer_dir =args.output_dir + "/tokenizer_trained"
+
         if os.path.exists(txt_dir):
            subprocess.call('rm -r '+txt_dir, shell=True)
-               
+        if os.path.exits(tokenizer_dir):
+            subprocess.call('rm -r '+tokenizer_dir, shell=True)
             
     accelerator.end_training()
 
