@@ -280,6 +280,13 @@ def parse_args():
         help="Path to embedding file",
     )
 
+    parser.add_argument(
+        "--add_embeddings",
+        action="store_true",
+        default=False,        
+        help="Add embeddings",
+    )
+
     parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
 
     args = parser.parse_args()
@@ -355,6 +362,18 @@ def load_learned_embed_in_clip(
         learned_embeds, text_encoder, tokenizer, token, idempotent
     )
 
+
+"""
+        if patch_ti:
+            print("LoRA : Patching token input")
+            token = load_learned_embed_in_clip(
+                ti_path,
+                pipe.text_encoder,
+                pipe.tokenizer,
+                token=token,
+                idempotent=idempotent_token,
+            )
+"""
 
 
 class DreamBoothDataset(Dataset):
@@ -574,6 +593,17 @@ def main():
       text_encoder = CLIPTextModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder")
     vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae")
     unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet")
+
+    ########################################################################################################
+    ## Load embeddings to tokenizer
+    ########################################################################################################
+
+    if args.add_embeddings:
+        
+        load_learned_embed_in_clip(args.embedding_path, text_encoder, tokenizer, idempotent=True)
+
+
+
 
     vae.requires_grad_(False)
     if not args.train_text_encoder:
