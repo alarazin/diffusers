@@ -845,7 +845,7 @@ def main():
          txt_dir=args.output_dir + "/text_encoder_trained"
          tokenizer_dir =args.output_dir + "/tokenizer_trained"
          if args.train_only_text_encoder:    
-             if args.add_embeddings:
+             if args.save_tokenizer:
                 pipeline = StableDiffusionPipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
                     text_encoder=accelerator.unwrap_model(text_encoder),
@@ -864,7 +864,7 @@ def main():
              if not os.path.exists(tokenizer_dir):
                os.mkdir(tokenizer_dir)
 
-             if args.add_embeddings:
+             if args.save_tokenizer:
                 pipeline = StableDiffusionPipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
                     unet=accelerator.unwrap_model(unet),
@@ -882,7 +882,7 @@ def main():
                 pipeline.text_encoder.save_pretrained(txt_dir)
 
       elif args.train_only_unet:
-        if args.add_embeddings:
+        if args.save_tokenizer:
             pipeline = StableDiffusionPipeline.from_pretrained(
                 args.pretrained_model_name_or_path,
                 unet=accelerator.unwrap_model(unet),
