@@ -312,11 +312,7 @@ def parse_args():
 
     return args
 
-if args.placeholder_token_at_data is not None:
-    tok, pat = args.placeholder_token_at_data.split("|")
-    token_map = {tok: pat}
-else:
-    token_map = None
+
 
 
 
@@ -548,6 +544,15 @@ def main():
         log_with="tensorboard",
         logging_dir=logging_dir,
     )
+    ###########################################################################################
+    ## TOKEN MAP 
+    ###########################################################################################
+    if args.placeholder_token_at_data is not None:
+        tok, pat = args.placeholder_token_at_data.split("|")
+        token_map = {tok: pat}
+    else:
+        token_map = None
+
 
     # Currently, it's not possible to do gradient accumulation when training two models with accelerate.accumulate
     # This will be enabled soon in accelerate. For now, we don't allow gradient accumulation when training two models.
@@ -619,7 +624,6 @@ def main():
     ########################################################################################################
 
     if args.add_embeddings:
-        
         load_learned_embed_in_clip(args.embedding_path, text_encoder, tokenizer, idempotent=True)
 
 
@@ -677,6 +681,7 @@ def main():
         size=args.resolution,
         center_crop=args.center_crop,
         args=args,
+        token_map=token_map
     )
 
     def collate_fn(examples):
