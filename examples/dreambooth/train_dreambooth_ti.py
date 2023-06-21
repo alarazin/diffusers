@@ -298,6 +298,13 @@ def parse_args():
         default=None,
         help="The prompt with identifier specifying the instance",
     )
+
+    parser.add_argument(
+        "--save_tokenizer",
+        action="store_true",
+        default=False,        
+        help="Save tokenizer",
+    )
     ###############################################################################################
 
     parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
@@ -826,29 +833,57 @@ def main():
     if accelerator.is_main_process:
       if args.dump_only_text_encoder:
          txt_dir=args.output_dir + "/text_encoder_trained"
-         if args.train_only_text_encoder:            
-             pipeline = StableDiffusionPipeline.from_pretrained(
-                 args.pretrained_model_name_or_path,
-                 text_encoder=accelerator.unwrap_model(text_encoder),
-             )
-             pipeline.save_pretrained(args.output_dir)     
+         if args.train_only_text_encoder:    
+             if args.add_embeddings:
+                pipeline = StableDiffusionPipeline.from_pretrained(
+                    args.pretrained_model_name_or_path,
+                    text_encoder=accelerator.unwrap_model(text_encoder),
+                    tokenizer = tokenizer
+                )
+                pipeline.save_pretrained(args.output_dir) 
+             else:        
+                pipeline = StableDiffusionPipeline.from_pretrained(
+                    args.pretrained_model_name_or_path,
+                    text_encoder=accelerator.unwrap_model(text_encoder),
+                )
+                pipeline.save_pretrained(args.output_dir)     
          else:
              if not os.path.exists(txt_dir):
                os.mkdir(txt_dir)
-             pipeline = StableDiffusionPipeline.from_pretrained(
-                 args.pretrained_model_name_or_path,
-                 unet=accelerator.unwrap_model(unet),
-                 text_encoder=accelerator.unwrap_model(text_encoder),
-             )
-             pipeline.text_encoder.save_pretrained(txt_dir)
+
+             if args.add_embeddings:
+                pipeline = StableDiffusionPipeline.from_pretrained(
+                    args.pretrained_model_name_or_path,
+                    unet=accelerator.unwrap_model(unet),
+                    text_encoder=accelerator.unwrap_model(text_encoder),
+                    tokenizer=tokenizer
+                )
+                pipeline.text_encoder.save_pretrained(txt_dir)
+             else:
+                pipeline = StableDiffusionPipeline.from_pretrained(
+                    args.pretrained_model_name_or_path,
+                    unet=accelerator.unwrap_model(unet),
+                    text_encoder=accelerator.unwrap_model(text_encoder),
+                )
+                pipeline.text_encoder.save_pretrained(txt_dir)
 
       elif args.train_only_unet:
-        pipeline = StableDiffusionPipeline.from_pretrained(
-            args.pretrained_model_name_or_path,
-            unet=accelerator.unwrap_model(unet),
-            text_encoder=accelerator.unwrap_model(text_encoder),
-        )
-        pipeline.save_pretrained(args.output_dir)
+        if args.add_embeddings:
+            pipeline = StableDiffusionPipeline.from_pretrained(
+                args.pretrained_model_name_or_path,
+                unet=accelerator.unwrap_model(unet),
+                text_encoder=accelerator.unwrap_model(text_encoder),
+                tokenizer=tokenizer
+            )
+            pipeline.save_pretrained(args.output_dir)
+
+        else:
+            pipeline = StableDiffusionPipeline.from_pretrained(
+                args.pretrained_model_name_or_path,
+                unet=accelerator.unwrap_model(unet),
+                text_encoder=accelerator.unwrap_model(text_encoder),
+            )
+            pipeline.save_pretrained(args.output_dir)
 
         txt_dir=args.output_dir + "/text_encoder_trained"
         if os.path.exists(txt_dir):
