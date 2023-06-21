@@ -843,7 +843,7 @@ def main():
         delete_learned_embeds = True
         tokenizer = CLIPTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer")
         text_encoder_resized = accelerator.unwrap_model(text_encoder).resize_token_embeddings(len(tokenizer))
-        print('Length of resized TE: ',len(text_encoder_resized.get_input_embeddings().weight.data))
+        #print('Length of resized TE: ',len(text_encoder_resized.get_input_embeddings().weight.data))
     # Create the pipeline using using the trained modules and save it.
     if accelerator.is_main_process:
       if args.dump_only_text_encoder:
