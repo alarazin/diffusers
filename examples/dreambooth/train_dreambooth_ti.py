@@ -842,8 +842,12 @@ def main():
     if not args.save_tokenizer and args.add_embeddings:
         delete_learned_embeds = True
         tokenizer = CLIPTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer")
-        text_encoder_resized = accelerator.unwrap_model(text_encoder).resize_token_embeddings(len(tokenizer))
-        #print('Length of resized TE: ',len(text_encoder_resized.get_input_embeddings().weight.data))
+        pipe_te = StableDiffusionPipeline.from_pretrained(
+            args.pretrained_model_name_or_path,
+            text_encoder = accelerator.unwrap_model(text_encoder)
+        )
+        text_encoder_resized = pipe_te.text_encoder.resize_token_embeddings(len(tokenizer))
+        print('Length of resized TE: ',len(text_encoder_resized.get_input_embeddings().weight.data))
     # Create the pipeline using using the trained modules and save it.
     if accelerator.is_main_process:
       if args.dump_only_text_encoder:
@@ -932,7 +936,7 @@ def main():
 
         if os.path.exists(txt_dir):
            subprocess.call('rm -r '+txt_dir, shell=True)
-        if os.path.exits(tokenizer_dir):
+        if os.path.exists(tokenizer_dir):
             subprocess.call('rm -r '+tokenizer_dir, shell=True)
             
     accelerator.end_training()
