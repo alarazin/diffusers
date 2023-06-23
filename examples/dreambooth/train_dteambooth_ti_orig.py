@@ -305,13 +305,6 @@ def parse_args():
         default=False,        
         help="Save tokenizer",
     )
-
-    parser.add_argument(
-        "--text_encoder_use_attention_mask",
-        action="store_true",
-        required=False,
-        help="Whether to use attention mask for the text encoder",
-    )
     ###############################################################################################
 
     parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
@@ -431,42 +424,24 @@ class DreamBoothDataset(Dataset):
         sys.stdout.flush()
 
         example["instance_images"] = self.image_transforms(instance_image)
-
-        ###############################################################################################
-        ### ADDED attention mask 
-        if args.text_encoder_use_attention_mask:
-            text_inputs = tokenize_prompt(self.tokenizer, instance_prompt, tokenizer_max_length=None)
-            example["instance_prompt_ids"] = text_inputs.input_ids
-            example["instance_attention_mask"] = text_inputs.attention_mask
-        else:
-            example["instance_prompt_ids"] = self.tokenizer(
-                instance_prompt,
-                padding="do_not_pad",
-                truncation=True,
-                max_length=self.tokenizer.model_max_length,
-            ).input_ids
-        ################################################################################################
+        example["instance_prompt_ids"] = self.tokenizer(
+            instance_prompt,
+            padding="do_not_pad",
+            truncation=True,
+            max_length=self.tokenizer.model_max_length,
+        ).input_ids
 
         if self.class_data_root:
             class_image = Image.open(self.class_images_path[index % self.num_class_images])
             if not class_image.mode == "RGB":
                 class_image = class_image.convert("RGB")
             example["class_images"] = self.image_transforms(class_image)
-
-        ################################################################################################
-        ## ADDED attention mask
-            if args.text_encoder_use_attention_mask:
-                class_text_inputs = tokenize_prompt(self.tokenizer, self.class_prompt, tokenizer_max_length=None)
-                example["class_prompt_ids"] = class_text_inputs.input_ids
-                example["class_attention_mask"] = class_text_inputs.attention_mask
-            else:
-                example["class_prompt_ids"] = self.tokenizer(
-                    self.class_prompt,
-                    padding="do_not_pad",
-                    truncation=True,
-                    max_length=self.tokenizer.model_max_length,
-                ).input_ids
-        ################################################################################################
+            example["class_prompt_ids"] = self.tokenizer(
+                self.class_prompt,
+                padding="do_not_pad",
+                truncation=True,
+                max_length=self.tokenizer.model_max_length,
+            ).input_ids
 
         return example
 
@@ -497,81 +472,6 @@ def get_full_repo_name(model_id: str, organization: Optional[str] = None, token:
         return f"{username}/{model_id}"
     else:
         return f"{organization}/{model_id}"
-
-
-def collate_fn(examples):
-    has_attention_mask = "instance_attention_mask" in examples[0]
-
-    input_ids = [example["instance_prompt_ids"] for example in examples]
-    pixel_values = [example["instance_images"] for example in examples]
-
-    if has_attention_mask:
-        attention_mask = [example["instance_attention_mask"] for example in examples]
-
-    # Concat class and instance examples for prior preservation.
-    # We do this to avoid doing two forward passes.
-    if args.with_prior_preservation:
-        input_ids += [example["class_prompt_ids"] for example in examples]
-        pixel_values += [example["class_images"] for example in examples]
-        if has_attention_mask:
-            attention_mask += [example["class_attention_mask"] for example in examples]
-
-
-    pixel_values = torch.stack(pixel_values)
-    pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-
-    ################################################################################################
-    ## ADDED attention mask
-    if args.text_encoder_use_attention_mask:
-        input_ids = torch.cat(input_ids, dim = 0)
-    else:
-        input_ids = tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
-    ################################################################################################
-
-    batch = {
-        "input_ids": input_ids,
-        "pixel_values": pixel_values,
-    }
-
-    if has_attention_mask:
-        attention_mask = torch.cat(attention_mask, dim=0)
-        batch["attention_mask"] = attention_mask
-
-    return batch
-
-def tokenize_prompt(tokenizer, prompt, tokenizer_max_length=None):
-    if tokenizer_max_length is not None:
-        max_length = tokenizer_max_length
-    else:
-        max_length = tokenizer.model_max_length
-
-    text_inputs = tokenizer(
-        prompt,
-        truncation=True,
-        padding="max_length",
-        max_length=max_length,
-        return_tensors="pt",
-    )
-
-    return text_inputs
-
-
-def encode_prompt(text_encoder, input_ids, attention_mask, text_encoder_use_attention_mask=None):
-    text_input_ids = input_ids.to(text_encoder.device)
-
-    if text_encoder_use_attention_mask:
-        attention_mask = attention_mask.to(text_encoder.device)
-    else:
-        attention_mask = None
-
-    prompt_embeds = text_encoder(
-        text_input_ids,
-        attention_mask=attention_mask,
-    )
-    prompt_embeds = prompt_embeds[0]
-
-    return prompt_embeds
-
 
 
 def main():
@@ -733,7 +633,26 @@ def main():
         token_map=token_map
     )
 
+    def collate_fn(examples):
+        input_ids = [example["instance_prompt_ids"] for example in examples]
+        pixel_values = [example["instance_images"] for example in examples]
 
+        # Concat class and instance examples for prior preservation.
+        # We do this to avoid doing two forward passes.
+        if args.with_prior_preservation:
+            input_ids += [example["class_prompt_ids"] for example in examples]
+            pixel_values += [example["class_images"] for example in examples]
+
+        pixel_values = torch.stack(pixel_values)
+        pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
+
+        input_ids = tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
+
+        batch = {
+            "input_ids": input_ids,
+            "pixel_values": pixel_values,
+        }
+        return batch
 
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=collate_fn
@@ -832,19 +751,7 @@ def main():
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
                 # Get the text embedding for conditioning
-                #######################################################################
-                ## ADDED attention mask 
-                if args.text_encoder_use_attention_mask:
-                    encoder_hidden_states = encode_prompt(
-                        text_encoder, 
-                        batch["input_ids"],
-                        batch["attention_mask"],
-                        text_encoder_use_attention_mask=args.text_encoder_use_attention_mask,
-                        )
-                else:
-                    encoder_hidden_states = text_encoder(batch["input_ids"])[0]
-                #######################################################################
-
+                encoder_hidden_states = text_encoder(batch["input_ids"])[0]
 
                 # Predict the noise residual
                 model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
