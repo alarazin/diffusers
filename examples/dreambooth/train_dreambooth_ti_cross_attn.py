@@ -312,6 +312,13 @@ def parse_args():
         required=False,
         help="Whether to use attention mask for the text encoder",
     )
+
+    parser.add_argument(
+        "--encode_prompt_attention_mask",
+        action="store_true",
+        required=False,
+        help="Whether to use attention mask for the while encoding the prompt",
+    )
     ###############################################################################################
 
     parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
@@ -556,22 +563,29 @@ def tokenize_prompt(tokenizer, prompt, tokenizer_max_length=None):
     return text_inputs
 
 
-def encode_prompt(text_encoder, input_ids, attention_mask, text_encoder_use_attention_mask=None):
+def encode_prompt(text_encoder, input_ids, attention_mask, text_encoder_use_attention_mask=None, encode_prompt_attention_mask =None):
     text_input_ids = input_ids.to(text_encoder.device)
 
     if text_encoder_use_attention_mask:
         attention_mask = attention_mask.to(text_encoder.device)
+        attention_mask_length = attention_mask.shape[-1]
+        extra_tokens_needed = 8 - (attention_mask_length % 8)
+        attention_mask = torch.nn.functional.pad(attention_mask, (0, extra_tokens_needed))
+
     else:
         attention_mask = None
 
-    prompt_embeds = text_encoder(
-        text_input_ids,
-        attention_mask=attention_mask,
-    )
+    if encode_prompt_attention_mask:
+        prompt_embeds = text_encoder(text_input_ids, attention_mask=attention_mask)
+    else:    
+        prompt_embeds = text_encoder(text_input_ids)
+
     prompt_embeds = prompt_embeds[0]
 
-    return prompt_embeds
+    if text_encoder_use_attention_mask:
+        prompt_embeds = torch.nn.functional.pad(prompt_embeds, (0, 0, 0, extra_tokens_needed,), 'replicate')
 
+    return prompt_embeds, attention_mask
 
 
 def main():
@@ -835,11 +849,12 @@ def main():
                 #######################################################################
                 ## ADDED attention mask 
                 if args.text_encoder_use_attention_mask:
-                    encoder_hidden_states = encode_prompt(
+                    encoder_hidden_states, sd_attention_mask = encode_prompt(
                         text_encoder, 
                         batch["input_ids"],
                         batch["attention_mask"],
                         text_encoder_use_attention_mask=args.text_encoder_use_attention_mask,
+                        encode_prompt_attention_mask=args.encode_prompt_attention_mask
                         )
                 else:
                     encoder_hidden_states = text_encoder(batch["input_ids"])[0]
@@ -847,7 +862,7 @@ def main():
 
 
                 # Predict the noise residual
-                model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
+                model_pred = unet(noisy_latents, timesteps, encoder_hidden_states, encoder_attention_mask=sd_attention_mask).sample
 
                 # Get the target for loss depending on the prediction type
                 if noise_scheduler.config.prediction_type == "epsilon":
