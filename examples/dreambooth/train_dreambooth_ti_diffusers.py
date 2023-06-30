@@ -546,6 +546,23 @@ def parse_args(input_args=None):
         default=None,
         help="The optional `class_label` conditioning to pass to the unet, available values are `timesteps`.",
     )
+    ##############################################################################################
+    ## ARGS CAPTION
+
+    parser.add_argument(
+        "--image_captions_filename",
+        action="store_true",
+        help="Get captions from filename",
+    )    
+    parser.add_argument(
+        "--external_captions",
+        action="store_true",
+        default=False,        
+        help="Use captions stored in a txt file",
+    )    
+      
+    ##############################################################################################
+
 
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -593,6 +610,9 @@ class DreamBoothDataset(Dataset):
         encoder_hidden_states=None,
         instance_prompt_encoder_hidden_states=None,
         tokenizer_max_length=None,
+        image_captions_filename=None, 
+        external_captions = None,
+
     ):
         self.size = size
         self.center_crop = center_crop
@@ -605,7 +625,8 @@ class DreamBoothDataset(Dataset):
         if not self.instance_data_root.exists():
             raise ValueError(f"Instance {self.instance_data_root} images root doesn't exists.")
 
-        self.instance_images_path = list(Path(instance_data_root).iterdir())
+        #self.instance_images_path = list(Path(instance_data_root).iterdir())
+        self.instance_images_path =  [path for path in self.instance_data_root.glob('*') if '.txt' not in path.suffix]
         self.num_instance_images = len(self.instance_images_path)
         self.instance_prompt = instance_prompt
         self._length = self.num_instance_images
@@ -631,24 +652,59 @@ class DreamBoothDataset(Dataset):
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
+        ############################################################################################
+        ## ADD CAPTIONING
+        self.image_captions_filename = image_captions_filename
+        self.external_captions = external_captions
+        ############################################################################################
+      
 
     def __len__(self):
         return self._length
 
     def __getitem__(self, index):
         example = {}
-        instance_image = Image.open(self.instance_images_path[index % self.num_instance_images])
-        instance_image = exif_transpose(instance_image)
+        #instance_image = Image.open(self.instance_images_path[index % self.num_instance_images])
+        path = self.instance_images_path[index % self.num_instance_images]
+        instance_image = Image.open(path)
+        instance_image = exif_transpose(instance_image)   #CHECKTHIS 
 
         if not instance_image.mode == "RGB":
             instance_image = instance_image.convert("RGB")
+
+        ############################################################################################
+        ## ADD CAPTIONING
+
+        instance_prompt = self.instance_prompt
+
+        if self.image_captions_filename:
+            capt = Path(path.stem)
+            pt=''.join([i for i in capt if not i.isdigit()])
+            pt=pt.replace("_"," ")
+            pt=pt.replace("(","")
+            pt=pt.replace(")","")
+            pt=pt.replace("-","")
+            pt=pt.strip()  # CHECKTHIS
+
+            instance_prompt = pt
+
+
+        elif self.external_captions:
+            caption_path = path.with_suffix(".txt")
+            if caption_path.exists():
+                with open(caption_path) as f:
+                    instance_prompt = f.read()
+            else:
+                print('No caption for image ', path)
+
+        ############################################################################################
         example["instance_images"] = self.image_transforms(instance_image)
 
         if self.encoder_hidden_states is not None:
             example["instance_prompt_ids"] = self.encoder_hidden_states
         else:
             text_inputs = tokenize_prompt(
-                self.tokenizer, self.instance_prompt, tokenizer_max_length=self.tokenizer_max_length
+                self.tokenizer, instance_prompt, tokenizer_max_length=self.tokenizer_max_length
             )
             example["instance_prompt_ids"] = text_inputs.input_ids
             example["instance_attention_mask"] = text_inputs.attention_mask
@@ -735,7 +791,7 @@ def model_has_vae(args):
         return any(file.rfilename == config_file_name for file in files_in_repo)
 
 
-def tokenize_prompt(tokenizer, prompt, tokenizer_max_length=None):
+def tokenize_prompt(tokenizer, prompt, tokenizer_max_length=None):  #CHECKTHIS -- max length or do not pad?
     if tokenizer_max_length is not None:
         max_length = tokenizer_max_length
     else:
@@ -1055,6 +1111,8 @@ def main(args):
         encoder_hidden_states=pre_computed_encoder_hidden_states,
         instance_prompt_encoder_hidden_states=pre_computed_instance_prompt_encoder_hidden_states,
         tokenizer_max_length=args.tokenizer_max_length,
+        image_captions_filename=args.image_captions_filename,
+        external_captions=args.external_captions
     )
 
     train_dataloader = torch.utils.data.DataLoader(
