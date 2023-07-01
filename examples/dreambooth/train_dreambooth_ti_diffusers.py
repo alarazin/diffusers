@@ -602,6 +602,22 @@ def parse_args(input_args=None):
         default=False,        
         help="Train only the unet",
     )
+    # 4. ATTENTION MASK 
+    parser.add_argument(
+        "--text_encoder_use_attention_mask_sd15",
+        action="store_true",
+        required=False,
+        help="Whether to use attention mask for the text encoder",
+    )
+
+    parser.add_argument(
+        "--encode_prompt_attention_mask",
+        action="store_true",
+        required=False,
+        help="Whether to use attention mask for the while encoding the prompt",
+    )    
+
+    # 5. ASPECT RATIO 
 
     ##############################################################################################
 
@@ -861,21 +877,36 @@ def tokenize_prompt(tokenizer, prompt, tokenizer_max_length=None):  #CHECKTHIS -
     return text_inputs
 
 
-def encode_prompt(text_encoder, input_ids, attention_mask, text_encoder_use_attention_mask=None):
+def encode_prompt(text_encoder, input_ids, attention_mask, text_encoder_use_attention_mask=None, text_encoder_use_attention_mask_sd15=None, encode_prompt_attention_mask=None):
     text_input_ids = input_ids.to(text_encoder.device)
 
-    if text_encoder_use_attention_mask:
+    ################################################################################
+    ## ADD ATTENTION MASK
+    if text_encoder_use_attention_mask_sd15:
+        attention_mask = attention_mask.to(text_encoder.device)
+        attention_mask_length = attention_mask.shape[-1]
+        extra_tokens_needed = 8 - (attention_mask_length % 8)
+        attention_mask = torch.nn.functional.pad(attention_mask, (0, extra_tokens_needed))
+
+    elif text_encoder_use_attention_mask:
         attention_mask = attention_mask.to(text_encoder.device)
     else:
         attention_mask = None
-
-    prompt_embeds = text_encoder(
-        text_input_ids,
-        attention_mask=attention_mask,
-    )
+    
+    if text_encoder_use_attention_mask_sd15 and not encode_prompt_attention_mask:
+        prompt_embeds = text_encoder(text_input_ids)
+    else:
+        prompt_embeds = text_encoder(
+            text_input_ids,
+            attention_mask=attention_mask,
+        )
     prompt_embeds = prompt_embeds[0]
 
-    return prompt_embeds
+    if text_encoder_use_attention_mask_sd15:
+        prompt_embeds = torch.nn.functional.pad(prompt_embeds, (0, 0, 0, extra_tokens_needed,), 'replicate')
+        return prompt_embeds, attention_mask
+    else:
+        return prompt_embeds
 
 
 def main(args):
@@ -1159,7 +1190,7 @@ def main(args):
                     text_encoder,
                     text_inputs.input_ids,
                     text_inputs.attention_mask,
-                    text_encoder_use_attention_mask=args.text_encoder_use_attention_mask,
+                    text_encoder_use_attention_mask=args.text_encoder_use_attention_mask
                 )
 
             return prompt_embeds
@@ -1350,14 +1381,28 @@ def main(args):
                 noisy_model_input = noise_scheduler.add_noise(model_input, noise, timesteps)
 
                 # Get the text embedding for conditioning
-                if args.pre_compute_text_embeddings:
+
+                ################################################################################
+                ## ADDED attention mask 
+                if args.text_encoder_use_attention_mask_sd15:
+                    encoder_hidden_states, sd_attention_mask = encode_prompt(
+                        text_encoder,
+                        batch["input_ids"],
+                        batch["attention_mask"],
+                        text_encoder_use_attention_mask=args.text_encoder_use_attention_mask,
+                        text_encoder_use_attention_mask_sd15=args.text_encoder_use_attention_mask_sd15,
+                        encode_prompt_attention_mask=args.encode_prompt_attention_mask
+                    )
+                ################################################################################
+
+                elif args.pre_compute_text_embeddings:
                     encoder_hidden_states = batch["input_ids"]
                 else:
                     encoder_hidden_states = encode_prompt(
                         text_encoder,
                         batch["input_ids"],
                         batch["attention_mask"],
-                        text_encoder_use_attention_mask=args.text_encoder_use_attention_mask,
+                        text_encoder_use_attention_mask=args.text_encoder_use_attention_mask
                     )
 
                 if accelerator.unwrap_model(unet).config.in_channels == channels * 2:
@@ -1369,9 +1414,12 @@ def main(args):
                     class_labels = None
 
                 # Predict the noise residual
-                model_pred = unet(
-                    noisy_model_input, timesteps, encoder_hidden_states, class_labels=class_labels
-                ).sample
+                if args.text_encoder_use_attention_mask_sd15:
+                    model_pred = unet(noisy_model_input, timesteps, encoder_hidden_states, encoder_attention_mask=sd_attention_mask).sample
+                else:
+                    model_pred = unet(
+                        noisy_model_input, timesteps, encoder_hidden_states, class_labels=class_labels
+                    ).sample
 
                 if model_pred.shape[1] == 6:
                     model_pred, _ = torch.chunk(model_pred, 2, dim=1)
