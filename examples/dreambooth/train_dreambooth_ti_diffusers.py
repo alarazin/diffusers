@@ -39,7 +39,7 @@ from PIL.ImageOps import exif_transpose
 from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm.auto import tqdm
-from transformers import AutoTokenizer, PretrainedConfig
+from transformers import AutoTokenizer, PretrainedConfig, CLIPTextModel, CLIPTokenizer
 
 import diffusers
 from diffusers import (
@@ -586,6 +586,29 @@ def parse_args(input_args=None):
         default=None,
         help="The prompt with identifier specifying the instance",
     )
+
+    # 3. SAVING & LOADING 
+
+    parser.add_argument(
+        "--dump_only_text_encoder",
+        action="store_true",
+        default=False,        
+        help="Dump only text-encoder",
+    )
+
+    parser.add_argument(
+        "--train_only_unet",
+        action="store_true",
+        default=False,        
+        help="Train only the unet",
+    )
+    parser.add_argument(
+        "--save_tokenizer",
+        action="store_true",
+        default=False,        
+        help="Save tokenizer",
+    )
+
     ##############################################################################################
 
 
@@ -972,7 +995,9 @@ def main(args):
             ).repo_id
 
     # Load the tokenizer
-    if args.tokenizer_name:
+    if args.add_embeddings and os.path.exists(str(args.output_dir+"/tokenizer_trained")):
+        tokenizer = CLIPTokenizer.from_pretrained(args.output_dir, subfolder="tokenizer_trained")
+    elif args.tokenizer_name:
         tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, revision=args.revision, use_fast=False)
     elif args.pretrained_model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(
@@ -982,14 +1007,21 @@ def main(args):
             use_fast=False,
         )
 
+    if args.train_only_unet or args.dump_only_text_encoder:
+        if os.path.exists(str(args.output_dir+"/text_encoder_trained")):
+            text_encoder = CLIPTextModel.from_pretrained(args.output_dir, subfolder="text_encoder_trained")
+        else:
+            text_encoder = CLIPTextModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder")
+        
+    else:
     # import correct text encoder class
-    text_encoder_cls = import_model_class_from_model_name_or_path(args.pretrained_model_name_or_path, args.revision)
+        text_encoder_cls = import_model_class_from_model_name_or_path(args.pretrained_model_name_or_path, args.revision)
+        text_encoder = text_encoder_cls.from_pretrained(
+            args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
+        )
 
     # Load scheduler and models
     noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
-    text_encoder = text_encoder_cls.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
-    )
 
     if model_has_vae(args):
         vae = AutoencoderKL.from_pretrained(
@@ -1445,33 +1477,91 @@ def main(args):
     if accelerator.is_main_process:
         pipeline_args = {}
 
-        if text_encoder is not None:
-            pipeline_args["text_encoder"] = accelerator.unwrap_model(text_encoder)
+        ##############################################################################################
+        ## ADD CUSTOM SAVING 
+        if args.dump_only_text_encoder:
+            txt_dir=args.output_dir + "/text_encoder_trained"
+            tokenizer_dir =args.output_dir + "/tokenizer_trained"
 
-        if args.skip_save_text_encoder:
-            pipeline_args["text_encoder"] = None
+            if not os.path.exists(txt_dir):
+                os.mkdir(txt_dir)
+            if not os.path.exists(tokenizer_dir):
+                os.mkdir(tokenizer_dir)
 
-        pipeline = DiffusionPipeline.from_pretrained(
-            args.pretrained_model_name_or_path,
-            unet=accelerator.unwrap_model(unet),
-            revision=args.revision,
-            **pipeline_args,
-        )
+            if args.add_embeddings:
+                pipeline = StableDiffusionPipeline.from_pretrained(
+                    args.pretrained_model_name_or_path,
+                    unet=accelerator.unwrap_model(unet),
+                    text_encoder=accelerator.unwrap_model(text_encoder),
+                    tokenizer=tokenizer
+                )
+                pipeline.text_encoder.save_pretrained(txt_dir)
+                pipeline.tokenizer.save_pretrained(tokenizer_dir)
 
-        # We train on the simplified learning objective. If we were previously predicting a variance, we need the scheduler to ignore it
-        scheduler_args = {}
+            else:
+                pipeline = StableDiffusionPipeline.from_pretrained(
+                    args.pretrained_model_name_or_path,
+                    unet=accelerator.unwrap_model(unet),
+                    text_encoder=accelerator.unwrap_model(text_encoder),
+                )
+                pipeline.text_encoder.save_pretrained(txt_dir)
 
-        if "variance_type" in pipeline.scheduler.config:
-            variance_type = pipeline.scheduler.config.variance_type
+        elif args.train_only_unet:
+            if args.add_embeddings:
+                pipeline = StableDiffusionPipeline.from_pretrained(
+                    args.pretrained_model_name_or_path,
+                    unet=accelerator.unwrap_model(unet),
+                    text_encoder=accelerator.unwrap_model(text_encoder),
+                    tokenizer=tokenizer
+                )
+                pipeline.save_pretrained(args.output_dir)
 
-            if variance_type in ["learned", "learned_range"]:
-                variance_type = "fixed_small"
+            else:
+                pipeline = StableDiffusionPipeline.from_pretrained(
+                    args.pretrained_model_name_or_path,
+                    unet=accelerator.unwrap_model(unet),
+                    text_encoder=accelerator.unwrap_model(text_encoder),
+                )
+                pipeline.save_pretrained(args.output_dir)
 
-            scheduler_args["variance_type"] = variance_type
+            txt_dir=args.output_dir + "/text_encoder_trained"
+            tokenizer_dir =args.output_dir + "/tokenizer_trained"
 
-        pipeline.scheduler = pipeline.scheduler.from_config(pipeline.scheduler.config, **scheduler_args)
+            if os.path.exists(txt_dir):
+                subprocess.call('rm -r '+txt_dir, shell=True)
+            if os.path.exists(tokenizer_dir):
+                subprocess.call('rm -r '+tokenizer_dir, shell=True)
 
-        pipeline.save_pretrained(args.output_dir)
+        ##############################################################################################
+        else:
+            if text_encoder is not None:
+                pipeline_args["text_encoder"] = accelerator.unwrap_model(text_encoder)
+
+            if args.skip_save_text_encoder:
+                pipeline_args["text_encoder"] = None
+                
+
+            pipeline = DiffusionPipeline.from_pretrained(
+                args.pretrained_model_name_or_path,
+                unet=accelerator.unwrap_model(unet),
+                revision=args.revision,
+                **pipeline_args,
+            )
+
+            # We train on the simplified learning objective. If we were previously predicting a variance, we need the scheduler to ignore it
+            scheduler_args = {}   # CHECKTHIS
+
+            if "variance_type" in pipeline.scheduler.config:
+                variance_type = pipeline.scheduler.config.variance_type
+
+                if variance_type in ["learned", "learned_range"]:
+                    variance_type = "fixed_small"
+
+                scheduler_args["variance_type"] = variance_type
+
+            pipeline.scheduler = pipeline.scheduler.from_config(pipeline.scheduler.config, **scheduler_args)
+
+            pipeline.save_pretrained(args.output_dir)
 
         if args.push_to_hub:
             save_model_card(
