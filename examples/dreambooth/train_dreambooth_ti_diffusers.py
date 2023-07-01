@@ -54,6 +54,10 @@ from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version, is_wandb_available
 from diffusers.utils.import_utils import is_xformers_available
 
+from safe_open import safe_open
+from embedding_utils import parse_safeloras_embeds, apply_learned_embed_in_clip, load_learned_embed_in_clip
+
+
 
 if is_wandb_available():
     import wandb
@@ -547,8 +551,8 @@ def parse_args(input_args=None):
         help="The optional `class_label` conditioning to pass to the unet, available values are `timesteps`.",
     )
     ##############################################################################################
-    ## ARGS CAPTION
-
+    ## NEW ARGS
+    # 1. CAPTION
     parser.add_argument(
         "--image_captions_filename",
         action="store_true",
@@ -559,8 +563,29 @@ def parse_args(input_args=None):
         action="store_true",
         default=False,        
         help="Use captions stored in a txt file",
-    )    
-      
+    )       
+
+    # 2. EMBEDDING
+    parser.add_argument(
+        "--embedding_path",
+        type=str,
+        default="",
+        help="Path to embedding file",
+    )
+
+    parser.add_argument(
+        "--add_embeddings",
+        action="store_true",
+        default=False,        
+        help="Add embeddings",
+    )
+
+    parser.add_argument(
+        "--placeholder_token_at_data",
+        type=str,
+        default=None,
+        help="The prompt with identifier specifying the instance",
+    )
     ##############################################################################################
 
 
@@ -612,6 +637,7 @@ class DreamBoothDataset(Dataset):
         tokenizer_max_length=None,
         image_captions_filename=None, 
         external_captions = None,
+        token_map = None
 
     ):
         self.size = size
@@ -657,6 +683,7 @@ class DreamBoothDataset(Dataset):
         self.image_captions_filename = image_captions_filename
         self.external_captions = external_captions
         ############################################################################################
+        self.token_map = token_map
       
 
     def __len__(self):
@@ -698,6 +725,15 @@ class DreamBoothDataset(Dataset):
                 print('No caption for image ', path)
 
         ############################################################################################
+        ## ADD TOKEN MAP
+        if self.token_map is not None:
+            for token, value in self.token_map.items():
+                instance_prompt = instance_prompt.replace(token, value)
+        sys.stdout.write(" [0;32m" +instance_prompt[:45]+" [0m")
+        sys.stdout.flush()        
+        ############################################################################################
+
+
         example["instance_images"] = self.image_transforms(instance_image)
 
         if self.encoder_hidden_states is not None:
@@ -841,6 +877,17 @@ def main(args):
         if not is_wandb_available():
             raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
 
+
+    ###########################################################################################
+    ## TOKEN MAP 
+    
+    if args.placeholder_token_at_data is not None:
+        tok, pat = args.placeholder_token_at_data.split("|")
+        token_map = {tok: pat}
+    else:
+        token_map = None
+    ###########################################################################################
+
     # Currently, it's not possible to do gradient accumulation when training two models with accelerate.accumulate
     # This will be enabled soon in accelerate. For now, we don't allow gradient accumulation when training two models.
     # TODO (patil-suraj): Remove this check when gradient accumulation with two models is enabled in accelerate.
@@ -954,6 +1001,23 @@ def main(args):
     unet = UNet2DConditionModel.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
     )
+
+
+    ########################################################################################################
+    ## Load embeddings to tokenizer
+
+    if args.add_embeddings:
+        if args.embedding_path.endswith('.safetensors'):
+            safeloras_lora = safe_open(args.embedding_path, framework="pt", device="cpu")
+            tok_dict = parse_safeloras_embeds(safeloras_lora)
+            apply_learned_embed_in_clip(tok_dict, text_encoder, tokenizer, idempotent=True)
+
+
+        else:
+            load_learned_embed_in_clip(args.embedding_path, text_encoder, tokenizer, idempotent=True)
+
+    ########################################################################################################
+
 
     # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
     def save_model_hook(models, weights, output_dir):
@@ -1112,7 +1176,8 @@ def main(args):
         instance_prompt_encoder_hidden_states=pre_computed_instance_prompt_encoder_hidden_states,
         tokenizer_max_length=args.tokenizer_max_length,
         image_captions_filename=args.image_captions_filename,
-        external_captions=args.external_captions
+        external_captions=args.external_captions,
+        token_map = token_map
     )
 
     train_dataloader = torch.utils.data.DataLoader(
