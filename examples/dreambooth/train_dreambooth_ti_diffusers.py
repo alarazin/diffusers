@@ -602,12 +602,6 @@ def parse_args(input_args=None):
         default=False,        
         help="Train only the unet",
     )
-    parser.add_argument(
-        "--save_tokenizer",
-        action="store_true",
-        default=False,        
-        help="Save tokenizer",
-    )
 
     ##############################################################################################
 
