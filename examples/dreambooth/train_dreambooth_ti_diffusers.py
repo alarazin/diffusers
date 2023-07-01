@@ -23,6 +23,7 @@ import os
 import shutil
 import warnings
 from pathlib import Path
+import subprocess
 
 import numpy as np
 import torch
@@ -757,10 +758,9 @@ class DreamBoothDataset(Dataset):
         if self.token_map is not None:
             for token, value in self.token_map.items():
                 instance_prompt = instance_prompt.replace(token, value)
-        sys.stdout.write(" [0;32m" +instance_prompt[:45]+" [0m")
-        sys.stdout.flush()        
+     
         ############################################################################################
-
+        print(instance_prompt)
 
         example["instance_images"] = self.image_transforms(instance_image)
 
