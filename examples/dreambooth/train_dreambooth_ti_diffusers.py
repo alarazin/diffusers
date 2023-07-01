@@ -572,14 +572,12 @@ def parse_args(input_args=None):
         default="",
         help="Path to embedding file",
     )
-
     parser.add_argument(
         "--add_embeddings",
         action="store_true",
         default=False,        
         help="Add embeddings",
     )
-
     parser.add_argument(
         "--placeholder_token_at_data",
         type=str,
@@ -588,20 +586,19 @@ def parse_args(input_args=None):
     )
 
     # 3. SAVING & LOADING 
-
     parser.add_argument(
         "--dump_only_text_encoder",
         action="store_true",
         default=False,        
         help="Dump only text-encoder",
     )
-
     parser.add_argument(
         "--train_only_unet",
         action="store_true",
         default=False,        
         help="Train only the unet",
     )
+
     # 4. ATTENTION MASK 
     parser.add_argument(
         "--text_encoder_use_attention_mask_sd15",
@@ -609,7 +606,6 @@ def parse_args(input_args=None):
         required=False,
         help="Whether to use attention mask for the text encoder",
     )
-
     parser.add_argument(
         "--encode_prompt_attention_mask",
         action="store_true",
@@ -747,7 +743,6 @@ class DreamBoothDataset(Dataset):
             pt=pt.strip()  # CHECKTHIS
 
             instance_prompt = pt
-
 
         elif self.external_captions:
             caption_path = path.with_suffix(".txt")
