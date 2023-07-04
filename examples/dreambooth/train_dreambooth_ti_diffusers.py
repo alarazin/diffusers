@@ -614,7 +614,16 @@ def parse_args(input_args=None):
         help="Whether to use attention mask for the while encoding the prompt",
     )    
 
-    # 5. ASPECT RATIO 
+    # 5. LASTBEN CONFIGS
+    parser.add_argument(
+        "--lastben_configs",
+        action="store_true",
+        required=False,
+        help="Use lastben configs",
+    )    
+
+
+    # 6. ASPECT RATIO
 
     ##############################################################################################
 
@@ -719,7 +728,7 @@ class DreamBoothDataset(Dataset):
     def __len__(self):
         return self._length
 
-    def __getitem__(self, index):
+    def __getitem__(self, index, args = parse_args()):
         example = {}
         #instance_image = Image.open(self.instance_images_path[index % self.num_instance_images])
         path = self.instance_images_path[index % self.num_instance_images]
@@ -766,6 +775,14 @@ class DreamBoothDataset(Dataset):
 
         if self.encoder_hidden_states is not None:
             example["instance_prompt_ids"] = self.encoder_hidden_states
+        elif args.lastben_configs:
+            print('APPLY LASTBEN CONFIGS, dataset, getitem')
+            example["instance_prompt_ids"] = self.tokenizer(
+                instance_prompt,
+                padding="do_not_pad",
+                truncation=True,
+                max_length=self.tokenizer.model_max_length,
+            ).input_ids
         else:
             text_inputs = tokenize_prompt(
                 self.tokenizer, instance_prompt, tokenizer_max_length=self.tokenizer_max_length
@@ -793,7 +810,7 @@ class DreamBoothDataset(Dataset):
         return example
 
 
-def collate_fn(examples, with_prior_preservation=False):
+def collate_fn(examples,tokenizer, with_prior_preservation=False, lastben_configs=None):
     has_attention_mask = "instance_attention_mask" in examples[0]
 
     input_ids = [example["instance_prompt_ids"] for example in examples]
@@ -814,7 +831,12 @@ def collate_fn(examples, with_prior_preservation=False):
     pixel_values = torch.stack(pixel_values)
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
-    input_ids = torch.cat(input_ids, dim=0)
+    if lastben_configs:
+        print('APPLY LASTBEN CONFIGS, collate_fn')
+        input_ids = tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt").input_ids
+    
+    else:
+        input_ids = torch.cat(input_ids, dim=0)
 
     batch = {
         "input_ids": input_ids,
@@ -855,19 +877,29 @@ def model_has_vae(args):
         return any(file.rfilename == config_file_name for file in files_in_repo)
 
 
-def tokenize_prompt(tokenizer, prompt, tokenizer_max_length=None):  #CHECKTHIS -- max length or do not pad?
+def tokenize_prompt(tokenizer, prompt, tokenizer_max_length=None, lastben_configs=None):  #CHECKTHIS -- max length or do not pad?
     if tokenizer_max_length is not None:
         max_length = tokenizer_max_length
     else:
         max_length = tokenizer.model_max_length
 
-    text_inputs = tokenizer(
-        prompt,
-        truncation=True,
-        padding="max_length",
-        max_length=max_length,
-        return_tensors="pt",
-    )
+    if lastben_configs:
+        print('APPLY LASTBEN CONFIGS, tokenize_prompt')
+        text_inputs = tokenizer(
+            prompt,
+            padding="do_not_pad",
+            truncation=True,
+            max_length=max_length
+        )
+
+    else:
+        text_inputs = tokenizer(
+            prompt,
+            truncation=True,
+            padding="max_length",
+            max_length=max_length,
+            return_tensors="pt",
+        )
 
     return text_inputs
 
@@ -887,6 +919,7 @@ def encode_prompt(text_encoder, input_ids, attention_mask, text_encoder_use_atte
         attention_mask = attention_mask.to(text_encoder.device)
     else:
         attention_mask = None
+    
     
     if text_encoder_use_attention_mask_sd15 and not encode_prompt_attention_mask:
         prompt_embeds = text_encoder(text_input_ids)
@@ -1236,7 +1269,7 @@ def main(args):
         train_dataset,
         batch_size=args.train_batch_size,
         shuffle=True,
-        collate_fn=lambda examples: collate_fn(examples, args.with_prior_preservation),
+        collate_fn=lambda examples: collate_fn(examples, tokenizer, with_prior_preservation=args.with_prior_preservation, lastben_configs=args.lastben_configs),
         num_workers=args.dataloader_num_workers,
     )
 
@@ -1349,11 +1382,16 @@ def main(args):
 
             with accelerator.accumulate(unet):
                 pixel_values = batch["pixel_values"].to(dtype=weight_dtype)
+                    
 
                 if vae is not None:
                     # Convert images to latent space
                     model_input = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist.sample()
-                    model_input = model_input * vae.config.scaling_factor
+                    if args.lastben_configs:
+                        print('APPLY LASTBEN CONFIGS, model_input')
+                        model_input = model_input * 0.18215
+                    else:
+                        model_input = model_input * vae.config.scaling_factor
                 else:
                     model_input = pixel_values
 
@@ -1379,14 +1417,17 @@ def main(args):
 
                 ################################################################################
                 ## ADDED attention mask 
-                if args.text_encoder_use_attention_mask_sd15:
+                if args.lastben_configs:
+                    print('APPLY LASTBEN CONFIGS, no encode_prompt')
+                    encoder_hidden_states = text_encoder(batch["input_ids"])[0]
+                elif args.text_encoder_use_attention_mask_sd15:
                     encoder_hidden_states, sd_attention_mask = encode_prompt(
                         text_encoder,
                         batch["input_ids"],
                         batch["attention_mask"],
                         text_encoder_use_attention_mask=args.text_encoder_use_attention_mask,
                         text_encoder_use_attention_mask_sd15=args.text_encoder_use_attention_mask_sd15,
-                        encode_prompt_attention_mask=args.encode_prompt_attention_mask
+                        encode_prompt_attention_mask=args.encode_prompt_attention_mask    
                     )
                 ################################################################################
 
@@ -1397,10 +1438,12 @@ def main(args):
                         text_encoder,
                         batch["input_ids"],
                         batch["attention_mask"],
-                        text_encoder_use_attention_mask=args.text_encoder_use_attention_mask
+                        text_encoder_use_attention_mask=args.text_encoder_use_attention_mask,
                     )
-
-                if accelerator.unwrap_model(unet).config.in_channels == channels * 2:
+                if args.lastben_configs:
+                    print('APPLY LASTBEN CONFIGS, unet channels')
+                    
+                elif accelerator.unwrap_model(unet).config.in_channels == channels * 2:
                     noisy_model_input = torch.cat([noisy_model_input, noisy_model_input], dim=1)
 
                 if args.class_labels_conditioning == "timesteps":
@@ -1415,8 +1458,9 @@ def main(args):
                     model_pred = unet(
                         noisy_model_input, timesteps, encoder_hidden_states, class_labels=class_labels
                     ).sample
-
-                if model_pred.shape[1] == 6:
+                if args.lastben_configs:
+                    print('APPLY LASTBEN CONFIGS, model_pred.shape')
+                elif model_pred.shape[1] == 6:
                     model_pred, _ = torch.chunk(model_pred, 2, dim=1)
 
                 # Get the target for loss depending on the prediction type
@@ -1510,7 +1554,7 @@ def main(args):
                 break
 
     # Create the pipeline using using the trained modules and save it.
-    accelerator.wait_for_everyone()
+        accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         pipeline_args = {}
 
