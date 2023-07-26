@@ -744,8 +744,9 @@ class DreamBoothDataset(Dataset):
         instance_prompt = self.instance_prompt
 
         if self.image_captions_filename:
-            capt = Path(path.stem)
-            pt=''.join([i for i in capt if not i.isdigit()])
+            #capt = Path(path.stem)
+            pt = str(path).split('/')[-1].split(".")[0]
+            #pt=''.join([i for i in capt if not i.isdigit()])
             pt=pt.replace("_"," ")
             pt=pt.replace("(","")
             pt=pt.replace(")","")
@@ -958,8 +959,16 @@ def main(args):
     ## TOKEN MAP 
     
     if args.placeholder_token_at_data is not None:
-        tok, pat = args.placeholder_token_at_data.split("|")
-        token_map = {tok: pat}
+        if len(args.placeholder_token_at_data.split('|'))>2:
+            token_map = {}
+            p_split = args.placeholder_token_at_data.split('-')
+            for tok_match in p_split:
+                tok, pat = tok_match.split('|')
+                token_map[tok] = pat
+            
+        else:
+            tok, pat = args.placeholder_token_at_data.split("|")
+            token_map = {tok: pat}
     else:
         token_map = None
     ###########################################################################################
