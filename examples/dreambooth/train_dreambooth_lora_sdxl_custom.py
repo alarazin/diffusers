@@ -305,6 +305,13 @@ def parse_args():
         help="LoRa dimension",
     )    
 
+    parser.add_argument(
+        "--placeholder_token_at_data",
+        type=str,
+        default=None,
+        help="The prompt with identifier specifying the instance",
+    )    
+
     args = parser.parse_args()
     
     return args
@@ -326,7 +333,8 @@ class DreamBoothDataset(Dataset):
         size=512,
         center_crop=False,
         instance_prompt_hidden_states=None,
-        instance_unet_added_conditions=None,    
+        instance_unet_added_conditions=None,  
+        token_map = None  
     ):
         self.size = size
         self.tokenizers=tokenizers
@@ -335,6 +343,8 @@ class DreamBoothDataset(Dataset):
         self.instance_prompt_hidden_states = instance_prompt_hidden_states
         self.instance_unet_added_conditions = instance_unet_added_conditions
         self.image_captions_filename = None
+        self.external_captions = None
+        self.token_map = None
 
         self.instance_data_root = Path(instance_data_root)
         if not self.instance_data_root.exists():
@@ -346,6 +356,12 @@ class DreamBoothDataset(Dataset):
 
         if args.image_captions_filename:
             self.image_captions_filename = True
+        elif args.external_captions:
+            self.external_captions = True
+
+        self.token_map = token_map
+
+        
         
         self.image_transforms = transforms.Compose(
             [
@@ -367,24 +383,32 @@ class DreamBoothDataset(Dataset):
             instance_image = instance_image.convert("RGB")
 
         if self.image_captions_filename:
-            filename = Path(path).stem
-            
-            pt=''.join([i for i in filename if not i.isdigit()])
+            #filename = Path(path).stem
+            pt = str(path).split('/')[-1].split(".")[0]
+            #pt=''.join([i for i in filename if not i.isdigit()])
             pt=pt.replace("_"," ")
             pt=pt.replace("(","")
             pt=pt.replace(")","")
             pt=pt.replace("-","")
-            pt=pt.replace("conceptimagedb","")  
-            
-            if args.external_captions:
-              cptpth=os.path.join(args.captions_dir, filename+'.txt')
-              if os.path.exists(cptpth):
-                with open(cptpth, "r") as f:
-                    instance_prompt=f.read()
-              else:
-                instance_prompt=pt
+            pt=pt.replace("conceptimagedb","")
+            pt = pt.strip()  
+            instance_prompt = pt
+
+        elif self.external_captions:
+            caption_path = path.with_suffix(".txt")
+            if caption_path.exists():
+                with open(caption_path) as f:
+                    instance_prompt = f.read()
             else:
-                instance_prompt = pt
+                print('No caption for image ', path)
+
+        ############################################################################################
+        ## ADD TOKEN MAP
+        if self.token_map is not None:
+            for token, value in self.token_map.items():
+                instance_prompt = instance_prompt.replace(token, value)
+     
+        ############################################################################################
         
         example["instance_images"] = self.image_transforms(instance_image)
         with torch.no_grad():
@@ -518,6 +542,24 @@ def main():
         logging_dir=logging_dir,
     )
 
+
+    ###########################################################################################
+    ## TOKEN MAP 
+    
+    if args.placeholder_token_at_data is not None:
+        if len(args.placeholder_token_at_data.split('|'))>2:
+            token_map = {}
+            p_split = args.placeholder_token_at_data.split('-')
+            for tok_match in p_split:
+                tok, pat = tok_match.split('|')
+                token_map[tok] = pat
+            
+        else:
+            tok, pat = args.placeholder_token_at_data.split("|")
+            token_map = {tok: pat}
+    else:
+        token_map = None
+    ###########################################################################################
         
     if args.seed is not None:
         set_seed(args.seed)
@@ -622,7 +664,8 @@ def main():
         text_encoders=text_encoders,
         size=args.resolution,
         center_crop=args.center_crop,
-        args=args
+        args=args,
+        token_map = token_map
     )
     
     train_dataloader = torch.utils.data.DataLoader(
