@@ -409,7 +409,7 @@ class DreamBoothDataset(Dataset):
                 instance_prompt = instance_prompt.replace(token, value)
      
         ############################################################################################
-        
+        print(instance_prompt)
         example["instance_images"] = self.image_transforms(instance_image)
         with torch.no_grad():
             example["instance_prompt_ids"], example["instance_added_cond_kwargs"]= compute_embeddings(args, instance_prompt, self.text_encoders, self.tokenizers)
