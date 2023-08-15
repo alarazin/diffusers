@@ -309,7 +309,7 @@ def parse_args():
     parser.add_argument(
         "--network_alpha",
         type=int,
-        default=64,        
+        default=20000,        
         help="Network alpha",
     )    
 
