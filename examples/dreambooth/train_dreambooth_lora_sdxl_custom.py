@@ -21,6 +21,7 @@ from accelerate.utils import set_seed
 from contextlib import nullcontext
 from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionXLPipeline, UNet2DConditionModel
 from diffusers.optimization import get_scheduler
+from diffusers.utils import check_min_version, is_wandb_available
 from huggingface_hub import HfFolder, Repository, whoami
 from PIL import Image
 from torchvision import transforms
@@ -306,11 +307,29 @@ def parse_args():
     )    
 
     parser.add_argument(
+        "--network_alpha",
+        type=int,
+        default=64,        
+        help="Network alpha",
+    )    
+
+
+    parser.add_argument(
         "--placeholder_token_at_data",
         type=str,
         default=None,
         help="The prompt with identifier specifying the instance",
     )    
+
+    parser.add_argument(
+        "--report_to",
+        type=str,
+        default="tensorboard",
+        help=(
+            'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
+            ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
+        ),
+    )
 
     args = parser.parse_args()
     
@@ -543,6 +562,11 @@ def main():
     )
 
 
+    if args.report_to == "wandb":
+        if not is_wandb_available():
+            raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
+        import wandb
+
     ###########################################################################################
     ## TOKEN MAP 
     
@@ -615,7 +639,7 @@ def main():
     vae.eval()
     
     model_path = os.path.join(args.Session_dir, os.path.basename(args.Session_dir) + ".safetensors")
-    network = create_network(1, args.dim, 20000, unet)
+    network = create_network(1, args.dim, args.network_alpha, unet)
     if args.resume:
         network.load_weights(model_path)
 
