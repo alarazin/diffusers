@@ -454,7 +454,7 @@ class DreamBoothDataset(Dataset):
             instance_prompt = self.append_text+instance_prompt
         ############################################################################################
         instance_prompt = ''.join([i for i in instance_prompt if not i.isdigit()])
-
+        print(instance_prompt)
         
         self.instance_prompt=instance_prompt
         
