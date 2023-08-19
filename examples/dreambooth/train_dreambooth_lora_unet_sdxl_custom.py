@@ -339,6 +339,14 @@ def parse_args():
         ),
     )
 
+    parser.add_argument(
+        "--weights_save_precision",
+        type=int,
+        default=16,        
+        help="saving precision",
+    )    
+
+
     args = parser.parse_args()
     
     return args
@@ -855,7 +863,14 @@ def main():
     if accelerator.is_main_process:
          network = accelerator.unwrap_model(network)
     accelerator.end_training()
-    network.save_weights(model_path, torch.float32, None)
+
+
+    if args.weights_save_precision==16:
+        print('saving with torch.float16')
+        network.save_weights(model_path, torch.float16, None)
+    else:
+        print('saving with torch.float32')
+        network.save_weights(model_path, torch.float32, None)
       
     accelerator.end_training()
 
