@@ -321,6 +321,14 @@ def parse_args():
         help="The prompt with identifier specifying the instance",
     )    
 
+
+    parser.add_argument(
+        "--append_caption",
+        type=str,
+        default=None,
+        help="Append text to caption",
+    )    
+
     parser.add_argument(
         "--report_to",
         type=str,
@@ -379,6 +387,7 @@ class DreamBoothDataset(Dataset):
             self.external_captions = True
 
         self.token_map = token_map
+        self.append_text = args.append_caption
 
         
         
@@ -427,6 +436,8 @@ class DreamBoothDataset(Dataset):
             for token, value in self.token_map.items():
                 instance_prompt = instance_prompt.replace(token, value)
      
+        if self.append_text is not None:
+            instance_prompt = self.append_text+instance_prompt
         ############################################################################################
         print(instance_prompt)
         example["instance_images"] = self.image_transforms(instance_image)
