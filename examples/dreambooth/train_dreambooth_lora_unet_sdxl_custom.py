@@ -26,10 +26,8 @@ from huggingface_hub import HfFolder, Repository, whoami
 from PIL import Image
 from torchvision import transforms
 from tqdm import tqdm
-from safetensors.torch import load_file, save_file
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPTextConfig, CLIPTextModelWithProjection
 
-import lora_sdxl_TI
 from lora_sdxl import *
 
 logger = get_logger(__name__)
@@ -55,121 +53,6 @@ def import_model_class_from_model_name_or_path(
         return CLIPTextModelWithProjection
     else:
         raise ValueError(f"{model_class} is not supported.")
-
-
-def merge_lora_models(models, merge_dtype, model_path):
-
-    def load_state_dict(file_name, dtype):
-        if os.path.splitext(file_name)[1] == ".safetensors":
-            sd = load_file(file_name)
-        else:
-            sd = torch.load(file_name, map_location="cuda")
-        for key in list(sd.keys()):
-            if type(sd[key]) == torch.Tensor:
-                sd[key] = sd[key].to(dtype)
-        return sd
-
-    def save_to_file(file_name, model, dtype):
-        if dtype is not None:
-            for key in list(model.keys()):
-                if type(model[key]) == torch.Tensor:
-                    model[key] = model[key].to(dtype)
-
-        if os.path.splitext(file_name)[1] == ".safetensors":
-            save_file(model, file_name)
-        else:
-            torch.save(model, file_name)
-
-
-    base_alphas = {}  # alpha for merged model
-    base_dims = {}
-
-    merged_sd = {}
-    for model in models:
-        #print(f"loading: {model}")
-        lora_sd = load_state_dict(model, torch.float32)
-
-        # get alpha and dim
-        alphas = {}  # alpha for current model
-        dims = {}  # dims for current model
-        for key in lora_sd.keys():
-            if "alpha" in key:
-                lora_module_name = key[: key.rfind(".alpha")]
-                alpha = float(lora_sd[key].detach().numpy())
-                alphas[lora_module_name] = alpha
-                if lora_module_name not in base_alphas:
-                    base_alphas[lora_module_name] = alpha
-            elif "lora_down" in key:
-                lora_module_name = key[: key.rfind(".lora_down")]
-                dim = lora_sd[key].size()[0]
-                dims[lora_module_name] = dim
-                if lora_module_name not in base_dims:
-                    base_dims[lora_module_name] = dim
-
-        for lora_module_name in dims.keys():
-            if lora_module_name not in alphas:
-                alpha = dims[lora_module_name]
-                alphas[lora_module_name] = alpha
-                if lora_module_name not in base_alphas:
-                    base_alphas[lora_module_name] = alpha
-
-        #print(f"dim: {list(set(dims.values()))}, alpha: {list(set(alphas.values()))}")
-
-        # merge
-        #print(f"merging...")
-        for key in lora_sd.keys():
-            if "alpha" in key:
-                continue
-
-            lora_module_name = key[: key.rfind(".lora_")]
-
-            base_alpha = base_alphas[lora_module_name]
-            alpha = alphas[lora_module_name]
-
-            scale = math.sqrt(alpha / base_alpha)
-
-            if key in merged_sd:
-                assert (
-                    merged_sd[key].size() == lora_sd[key].size()
-                ), f"weights shape mismatch merging v1 and v2, different dims? / 重みのサイズが合いません。v1とv2、または次元数の異なるモデルはマージできません"
-                merged_sd[key] = merged_sd[key] + lora_sd[key] * scale
-            else:
-                merged_sd[key] = lora_sd[key] * scale
-
-    # set alpha to sd
-    for lora_module_name, alpha in base_alphas.items():
-        key = lora_module_name + ".alpha"
-        merged_sd[key] = torch.tensor(alpha)
-
-    #print("merged model")
-    #print(f"dim: {list(set(base_dims.values()))}, alpha: {list(set(base_alphas.values()))}")
-
-    save_to_file(model_path, merged_sd, torch.float16)
-
-
-def load_state_dict(file_name, dtype):
-    if os.path.splitext(file_name)[1] == ".safetensors":
-        sd = load_file(file_name)
-    else:
-        sd = torch.load(file_name, map_location="cuda")
-    for key in list(sd.keys()):
-        if type(sd[key]) == torch.Tensor:
-            sd[key] = sd[key].to(dtype)
-    return sd
-
-
-def save_to_file(file_name, model, dtype):
-    if dtype is not None:
-        for key in list(model.keys()):
-            if type(model[key]) == torch.Tensor:
-                model[key] = model[key].to(dtype)
-
-    if os.path.splitext(file_name)[1] == ".safetensors":
-        save_file(model, file_name)
-    else:
-        torch.save(model, file_name)
-
-
         
 
 def parse_args():
@@ -430,34 +313,12 @@ def parse_args():
         help="Network alpha",
     )    
 
-    parser.add_argument(
-        "--optimizer_type",
-        type=str,
-        default=None,
-        help="Which optimizer, None if AdamW8bit, Prodigy",
-    )    
-
-    parser.add_argument(
-        "--optimizer_args",
-        type=str,
-        default=None,
-        nargs="*",
-        help='additional arguments for optimizer (like "weight_decay=0.01 betas=0.9,0.999 ...") / オプティマイザの追加引数（例： "weight_decay=0.01 betas=0.9,0.999 ..."）',
-    )
-
 
     parser.add_argument(
         "--placeholder_token_at_data",
         type=str,
         default=None,
         help="The prompt with identifier specifying the instance",
-    )    
-
-    parser.add_argument(
-        "--append_caption",
-        type=str,
-        default=None,
-        help="Append text to caption",
     )    
 
     parser.add_argument(
@@ -470,73 +331,9 @@ def parse_args():
         ),
     )
 
-    parser.add_argument(
-        "--weights_save_precision",
-        type=int,
-        default=16,        
-        help="saving precision",
-    )    
-
-
-
     args = parser.parse_args()
     
     return args
-
-
-def get_optimizer(args, trainable_params):
-
-    optimizer_type = args.optimizer_type
-
-
-    optimizer_kwargs = {}
-    if args.optimizer_args is not None and len(args.optimizer_args) > 0:
-        for arg in args.optimizer_args:
-            key, value = arg.split("=")
-            value = ast.literal_eval(value)
-
-            optimizer_kwargs[key] = value
-
-    lr = args.learning_rate
-    optimizer = None
-
-    if optimizer_type == "Prodigy".lower():
-        # Prodigy
-        # check Prodigy is installed
-        try:
-            import prodigyopt
-        except ImportError:
-            raise ImportError("No Prodigy / Prodigy がインストールされていないようです")
-
-        # check lr and lr_count, and print warning
-        actual_lr = lr
-        lr_count = 1
-        if type(trainable_params) == list and type(trainable_params[0]) == dict:
-            lrs = set()
-            actual_lr = trainable_params[0].get("lr", actual_lr)
-            for group in trainable_params:
-                lrs.add(group.get("lr", actual_lr))
-            lr_count = len(lrs)
-
-        if actual_lr <= 0.1:
-            print(
-                f"learning rate is too low. If using Prodigy, set learning rate around 1.0 / 学習率が低すぎるようです。1.0前後の値を指定してください: lr={actual_lr}"
-            )
-            print("recommend option: lr=1.0 / 推奨は1.0です")
-        if lr_count > 1:
-            print(
-                f"when multiple learning rates are specified with Prodigy (e.g. for Text Encoder and U-Net), only the first one will take effect / Prodigyで複数の学習率を指定した場合（Text EncoderとU-Netなど）、最初の学習率のみが有効になります: lr={actual_lr}"
-            )
-
-        print(f"use Prodigy optimizer | {optimizer_kwargs}")
-        optimizer_class = prodigyopt.Prodigy
-        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
-
-
-    optimizer_name = optimizer_class.__module__ + "." + optimizer_class.__name__
-    optimizer_args = ",".join([f"{k}={v}" for k, v in optimizer_kwargs.items()])
-
-    return optimizer_name, optimizer_args, optimizer
 
 
 
@@ -582,7 +379,8 @@ class DreamBoothDataset(Dataset):
             self.external_captions = True
 
         self.token_map = token_map
-        self.append_text = args.append_caption
+
+        
         
         self.image_transforms = transforms.Compose(
             [
@@ -629,12 +427,7 @@ class DreamBoothDataset(Dataset):
             for token, value in self.token_map.items():
                 instance_prompt = instance_prompt.replace(token, value)
      
-
-        if self.append_text is not None:
-            instance_prompt = self.append_text+instance_prompt
         ############################################################################################
-
-
         print(instance_prompt)
         example["instance_images"] = self.image_transforms(instance_image)
         with torch.no_grad():
@@ -828,14 +621,14 @@ def main():
 
     text_encoder_one = text_encoder_cls_one.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="text_encoder", use_auth_token=True,
-    ).to("cuda")
+    )
     text_encoder_two = text_encoder_cls_two.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="text_encoder_2", use_auth_token=True
-    ).to("cuda")
-    vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", use_auth_token=True).to("cuda")
+    )
+    vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", use_auth_token=True)
     unet = UNet2DConditionModel.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="unet", use_auth_token=True
-    ).to("cuda") 
+    ) 
     
     vae.requires_grad_(False)
     text_encoder_one.requires_grad_(False)
@@ -844,10 +637,8 @@ def main():
     text_encoder_one.eval()
     text_encoder_two.eval()
     vae.eval()
-    unet.eval()
     
     model_path = os.path.join(args.Session_dir, os.path.basename(args.Session_dir) + ".safetensors")
-    model_path_TI = os.path.join(args.Session_dir, os.path.basename(args.Session_dir) + "_TI.safetensors")
     network = create_network(1, args.dim, args.network_alpha, unet)
     if args.resume:
         network.load_weights(model_path)
@@ -865,22 +656,10 @@ def main():
     set_diffusers_xformers_flag(unet, True)   
    
     network.apply_to(unet, True)
-    network.prepare_optimizer_params(args.learning_rate)
     trainable_params = network.parameters()
     
     tokenizers = [tokenizer_one, tokenizer_two]
     text_encoders = [text_encoder_one, text_encoder_two]      
-    if os.path.exists(model_path_TI):    
-        for weights_file in [model_path_TI]:
-            if ";" in weights_file:
-                weights_file, multiplier = weights_file.split(";")
-                multiplier = float(multiplier)
-            else:
-                multiplier = 1.0
-            lora_model, weights_sd = lora_sdxl_TI.create_network_from_weights(
-                multiplier, weights_file, text_encoders, None, True
-            )
-            lora_model.merge_to(text_encoders, weights_sd, torch.float32, 'cuda')    
 
 
     if args.gradient_checkpointing:
@@ -1005,18 +784,17 @@ def main():
     global_step = 0
 
     for epoch in range(args.num_train_epochs):
-
+        unet.train()
+        network.train()
         for step, batch in enumerate(train_dataloader):
-            network.train()
-            with accelerator.accumulate(network):
+            with accelerator.accumulate(unet):
 
                 with torch.no_grad():
                     model_input = batch[0][0]
  
                 # Sample noise that we'll add to the latents
-                if args.offset_noise:  
-                    noise = torch.randn_like(model_input)
-
+                if args.offset_noise:
+                    noise = torch.randn_like(model_input)# + args.ofstnselvl * torch.randn(model_input.shape[0], model_input.shape[1], 1, 1, device=model_input.device)
                 else:
                     noise = torch.randn_like(model_input)
 
@@ -1039,7 +817,7 @@ def main():
                 accelerator.backward(loss)
                 optimizer.step()
                 lr_scheduler.step()
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
@@ -1063,23 +841,8 @@ def main():
     if accelerator.is_main_process:
          network = accelerator.unwrap_model(network)
     accelerator.end_training()
-
-    if args.weights_save_precision==16:
-        save_prec = torch.float16
-        #network.save_weights(model_path, torch.float16, None)
-    else:
-        #network.save_weights(model_path, torch.float32, None)
-        save_prec = torch.float32
-
-
-    if os.path.exists(model_path_TI):
-        network.save_weights(model_path, save_prec, None)
-        final_models=[model_path, model_path_TI]
-        merge_lora_models(final_models, save_prec, model_path)
-        subprocess.call('rm '+model_path_TI, shell=True)
-    else:
-        network.save_weights(model_path, save_prec, None)
-
+    network.save_weights(model_path, torch.float32, None)
+      
     accelerator.end_training()
 
 if __name__ == "__main__":
