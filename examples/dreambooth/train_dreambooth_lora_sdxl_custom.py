@@ -313,12 +313,34 @@ def parse_args():
         help="Network alpha",
     )    
 
+    parser.add_argument(
+        "--optimizer_type",
+        type=str,
+        default=None,
+        help="Which optimizer, None if AdamW8bit, Prodigy",
+    )    
+
+    parser.add_argument(
+        "--optimizer_args",
+        type=str,
+        default=None,
+        nargs="*",
+        help='additional arguments for optimizer (like "weight_decay=0.01 betas=0.9,0.999 ...") / オプティマイザの追加引数（例： "weight_decay=0.01 betas=0.9,0.999 ..."）',
+    )
+
 
     parser.add_argument(
         "--placeholder_token_at_data",
         type=str,
         default=None,
         help="The prompt with identifier specifying the instance",
+    )    
+
+    parser.add_argument(
+        "--append_caption",
+        type=str,
+        default=None,
+        help="Append text to caption",
     )    
 
     parser.add_argument(
@@ -331,9 +353,73 @@ def parse_args():
         ),
     )
 
+    parser.add_argument(
+        "--weights_save_precision",
+        type=int,
+        default=32,        
+        help="saving precision",
+    )    
+
+
+
     args = parser.parse_args()
     
     return args
+
+
+def get_optimizer(args, trainable_params):
+
+    optimizer_type = args.optimizer_type
+
+
+    optimizer_kwargs = {}
+    if args.optimizer_args is not None and len(args.optimizer_args) > 0:
+        for arg in args.optimizer_args:
+            key, value = arg.split("=")
+            value = ast.literal_eval(value)
+
+            optimizer_kwargs[key] = value
+
+    lr = args.learning_rate
+    optimizer = None
+
+    if optimizer_type == "Prodigy".lower():
+        # Prodigy
+        # check Prodigy is installed
+        try:
+            import prodigyopt
+        except ImportError:
+            raise ImportError("No Prodigy / Prodigy がインストールされていないようです")
+
+        # check lr and lr_count, and print warning
+        actual_lr = lr
+        lr_count = 1
+        if type(trainable_params) == list and type(trainable_params[0]) == dict:
+            lrs = set()
+            actual_lr = trainable_params[0].get("lr", actual_lr)
+            for group in trainable_params:
+                lrs.add(group.get("lr", actual_lr))
+            lr_count = len(lrs)
+
+        if actual_lr <= 0.1:
+            print(
+                f"learning rate is too low. If using Prodigy, set learning rate around 1.0 / 学習率が低すぎるようです。1.0前後の値を指定してください: lr={actual_lr}"
+            )
+            print("recommend option: lr=1.0 / 推奨は1.0です")
+        if lr_count > 1:
+            print(
+                f"when multiple learning rates are specified with Prodigy (e.g. for Text Encoder and U-Net), only the first one will take effect / Prodigyで複数の学習率を指定した場合（Text EncoderとU-Netなど）、最初の学習率のみが有効になります: lr={actual_lr}"
+            )
+
+        print(f"use Prodigy optimizer | {optimizer_kwargs}")
+        optimizer_class = prodigyopt.Prodigy
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+
+
+    optimizer_name = optimizer_class.__module__ + "." + optimizer_class.__name__
+    optimizer_args = ",".join([f"{k}={v}" for k, v in optimizer_kwargs.items()])
+
+    return optimizer_name, optimizer_args, optimizer
 
 
 
@@ -379,8 +465,7 @@ class DreamBoothDataset(Dataset):
             self.external_captions = True
 
         self.token_map = token_map
-
-        
+        self.append_text = args.append_caption
         
         self.image_transforms = transforms.Compose(
             [
@@ -427,7 +512,12 @@ class DreamBoothDataset(Dataset):
             for token, value in self.token_map.items():
                 instance_prompt = instance_prompt.replace(token, value)
      
+
+        if self.append_text:
+            instance_prompt = self.append_text+instance_prompt
         ############################################################################################
+
+
         print(instance_prompt)
         example["instance_images"] = self.image_transforms(instance_image)
         with torch.no_grad():
@@ -841,7 +931,11 @@ def main():
     if accelerator.is_main_process:
          network = accelerator.unwrap_model(network)
     accelerator.end_training()
-    network.save_weights(model_path, torch.float32, None)
+
+    if args.weights_save_precision==16:
+        network.save_weights(model_path, torch.float16, None)
+    else:
+        network.save_weights(model_path, torch.float32, None)
       
     accelerator.end_training()
 
