@@ -586,6 +586,14 @@ def parse_args(input_args=None):
         help="The prompt with identifier specifying the instance",
     )
 
+    parser.add_argument(
+        "--append_caption",
+        type=str,
+        default=None,
+        help="Append text to caption",
+    )    
+
+
     # 3. SAVING & LOADING 
     parser.add_argument(
         "--dump_only_text_encoder",
@@ -768,6 +776,9 @@ class DreamBoothDataset(Dataset):
         if self.token_map is not None:
             for token, value in self.token_map.items():
                 instance_prompt = instance_prompt.replace(token, value)
+
+        if args.append_caption is not None:
+            instance_prompt = args.append_caption +instance_prompt
      
         ############################################################################################
         print(instance_prompt)
