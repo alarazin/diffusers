@@ -144,7 +144,7 @@ def merge_lora_models(models, merge_dtype, model_path):
     #print("merged model")
     #print(f"dim: {list(set(base_dims.values()))}, alpha: {list(set(base_alphas.values()))}")
 
-    save_to_file(model_path, merged_sd, torch.float16)
+    save_to_file(model_path, merged_sd, merge_dtype)
 
 
 def load_state_dict(file_name, dtype):
@@ -1073,7 +1073,7 @@ def main():
 
 
     if os.path.exists(model_path_TI):
-        network.save_weights(model_path, save_prec, None)
+        #network.save_weights(model_path, save_prec, None)
         final_models=[model_path, model_path_TI]
         merge_lora_models(final_models, save_prec, model_path)
         subprocess.call('rm '+model_path_TI, shell=True)
