@@ -76,6 +76,7 @@ def merge_lora_models(models, merge_dtype, model_path):
                     model[key] = model[key].to(dtype)
 
         if os.path.splitext(file_name)[1] == ".safetensors":
+            print('SAVING MERGED MODEL WITH ', merge_dtype)
             save_file(model, file_name)
         else:
             torch.save(model, file_name)
@@ -143,7 +144,7 @@ def merge_lora_models(models, merge_dtype, model_path):
 
     #print("merged model")
     #print(f"dim: {list(set(base_dims.values()))}, alpha: {list(set(base_alphas.values()))}")
-
+    
     save_to_file(model_path, merged_sd, merge_dtype)
 
 
