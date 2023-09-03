@@ -1008,9 +1008,10 @@ def main():
     global_step = 0
 
     for epoch in range(args.num_train_epochs):
+        network.train()
 
         for step, batch in enumerate(train_dataloader):
-            network.train()
+            #network.train()
             with accelerator.accumulate(network):
 
                 with torch.no_grad():
@@ -1080,7 +1081,7 @@ def main():
         final_models=[model_path_UNET, model_path_TI]
         merge_lora_models(final_models, save_prec, model_path)
         subprocess.call('rm '+model_path_TI, shell=True)
-        
+
     else:
         network.save_weights(model_path, save_prec, None)
 
