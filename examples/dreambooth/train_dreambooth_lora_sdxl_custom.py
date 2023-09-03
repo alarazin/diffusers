@@ -1081,7 +1081,7 @@ def main():
         final_models=[model_path_UNET, model_path_TI]
         merge_lora_models(final_models, save_prec, model_path)
         subprocess.call('rm '+model_path_TI, shell=True)
-
+        subprocess.call('rm '+model_path_UNET, shell=True)
     else:
         network.save_weights(model_path, save_prec, None)
 
