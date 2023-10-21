@@ -1081,7 +1081,7 @@ def main():
                 intrmdr= os.path.join(args.Session_dir, os.path.basename(args.Session_dir)+'_epoch_'+str(epoch+1)+'.safetensors')
 
                 if os.path.exists(model_path_TI):
-                    network.save_weights(model_path, torch.float16, None)
+                    network.save_weights(intrmdr, torch.float16, None)
                     final_models=[intrmdr, model_path_TI]
                     merge_lora_models(final_models, torch.float16, intrmdr)
                 else:
