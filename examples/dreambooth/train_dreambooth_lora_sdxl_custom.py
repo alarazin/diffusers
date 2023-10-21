@@ -1077,16 +1077,16 @@ def main():
             accelerator.log(logs, step=global_step)
 
             if epoch+1 in json.loads(args.saves) and step+1==len(train_dataloader):
-                print(" [1;33mSaving LoRA...")
+                unwrapped=accelerator.unwrap_model(network)
                 intrmdr= os.path.join(args.Session_dir, os.path.basename(args.Session_dir)+'_epoch_'+str(epoch+1)+'.safetensors')
 
                 if os.path.exists(model_path_TI):
-                    network.save_weights(intrmdr, torch.float16, None)
+                    unwrapped.save_weights(intrmdr, torch.float16, None)
                     final_models=[intrmdr, model_path_TI]
                     merge_lora_models(final_models, torch.float16, intrmdr)
                 else:
-                    network.save_weights(intrmdr, torch.float16, None)                
-                print("[1;33mDone, resuming training ...[0m")   
+                    unwrapped.save_weights(intrmdr, torch.float16, None)                
+                print("[1;33mIntermediary LoRA saved at epoch "+str(epoch+1)+'[0m')
 
 
             if global_step >= args.max_train_steps:
