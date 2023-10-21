@@ -20,7 +20,7 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from contextlib import nullcontext
-from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionXLPipeline, UNet2DConditionModel
+from diffusers import AutoencoderKL, PNDMScheduler, StableDiffusionXLPipeline, UNet2DConditionModel #DDPMScheduler, 
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version, is_wandb_available
 from huggingface_hub import HfFolder, Repository, whoami
@@ -914,7 +914,7 @@ def main():
         eps=args.adam_epsilon,
     )
 
-    noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler", use_auth_token=True)
+    noise_scheduler = PNDMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler", use_auth_token=True)
     
     train_dataset = DreamBoothDataset(
         instance_data_root=args.instance_data_dir,
