@@ -705,6 +705,10 @@ def main():
         collate_fn=lambda examples: collate_fn(examples, args)
     )
 
+    if args.gradient_checkpointing:
+        unet.enable_gradient_checkpointing()
+        unet.train()
+
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
