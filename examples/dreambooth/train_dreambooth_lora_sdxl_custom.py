@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 import subprocess
 import sys
+import json
 
 import gc
 import torch
@@ -478,6 +479,13 @@ def parse_args():
         help="saving precision",
     )    
 
+    parser.add_argument(
+        "--saves",
+        type=str,
+        default="[]",
+        help="Intermadiary saves",
+    )    
+
 
 
     args = parser.parse_args()
@@ -587,8 +595,8 @@ class DreamBoothDataset(Dataset):
         
         self.image_transforms = transforms.Compose(
             [
-                transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
-                transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size),
+                #transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
+                #transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
@@ -601,6 +609,8 @@ class DreamBoothDataset(Dataset):
         example = {}
         path = self.instance_images_path[index % self.num_instance_images]
         instance_image = Image.open(path)
+        width, height = instance_image.size
+
         if not instance_image.mode == "RGB":
             instance_image = instance_image.convert("RGB")
 
@@ -639,7 +649,7 @@ class DreamBoothDataset(Dataset):
         print(instance_prompt)
         example["instance_images"] = self.image_transforms(instance_image)
         with torch.no_grad():
-            example["instance_prompt_ids"], example["instance_added_cond_kwargs"]= compute_embeddings(args, instance_prompt, self.text_encoders, self.tokenizers)
+            example["instance_prompt_ids"], example["instance_added_cond_kwargs"]= compute_embeddings(height, width, instance_prompt, self.text_encoders, self.tokenizers)
 
         return example
 
@@ -723,9 +733,9 @@ def collate_fn(examples):
     return batch
 
 
-def compute_embeddings(args, prompt, text_encoders, tokenizers):
-    original_size = (args.resolution, args.resolution)
-    target_size = (args.resolution, args.resolution)
+def compute_embeddings(height, width, prompt, text_encoders, tokenizers):
+    original_size = (height, width)
+    target_size = (height, width)
     crops_coords_top_left = (0, 0)
 
     with torch.no_grad():
@@ -1054,10 +1064,26 @@ def main():
             fll=round(fll/4)
             pr=bar(fll)
             
-            logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
+            #logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
+            Epochs="[0;32mEpoch" if step==0 else "Epoch"
+            logs = {Epochs: str(epoch+1)+'('+str(step+1)+'/'+str(len(train_dataloader))+')[0m', "loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
+
             progress_bar.set_postfix(**logs)
             progress_bar.set_description_str("Progress")
             accelerator.log(logs, step=global_step)
+
+            if epoch+1 in json.loads(args.saves) and step+1==len(train_dataloader):
+                print(" [1;33mSaving LoRA...")
+                intrmdr= os.path.join(args.Session_dir, os.path.basename(args.Session_dir)+'_epoch_'+str(epoch+1)+'.safetensors')
+
+                if os.path.exists(model_path_TI):
+                    network.save_weights(model_path, torch.float16, None)
+                    final_models=[intrmdr, model_path_TI]
+                    merge_lora_models(final_models, torch.float16, intrmdr)
+                else:
+                    network.save_weights(intrmdr, torch.float16, None)                
+                print("[1;33mDone, resuming training ...[0m")   
+
 
             if global_step >= args.max_train_steps:
                 break
