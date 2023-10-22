@@ -549,7 +549,7 @@ def collate_fn(examples, args):
         
     return batch
 
-def compute_embeddings(prompt, text_encoders, tokenizers):
+def compute_embeddings(height, width, prompt, text_encoders, tokenizers):
     #original_size = (args.resolution, args.resolution)
     #target_size = (args.resolution, args.resolution)
     original_size = (height, width)
