@@ -859,7 +859,7 @@ def main():
     
     model_path=os.path.join(args.Session_dir, os.path.basename(args.Session_dir) + ".safetensors")
 
-    model_path_UNET = os.path.join(args.Session_dir, os.path.basename(args.Session_dir) + "_UNET.safetensors")
+    #model_path_UNET = os.path.join(args.Session_dir, os.path.basename(args.Session_dir) + "_UNET.safetensors")
     model_path_TI = os.path.join(args.Session_dir, os.path.basename(args.Session_dir) + "_TI.safetensors")
     network = create_network(1, args.dim, args.network_alpha, unet)
     if args.resume:
@@ -1107,11 +1107,11 @@ def main():
 
 
     if os.path.exists(model_path_TI):
-        network.save_weights(model_path_UNET, save_prec, None)
-        final_models=[model_path_UNET, model_path_TI]
+        network.save_weights(model_path, save_prec, None) #model_path_UNET
+        final_models=[model_path, model_path_TI] #model_path_UNET
         merge_lora_models(final_models, save_prec, model_path)
         subprocess.call('rm '+model_path_TI, shell=True)
-        subprocess.call('rm '+model_path_UNET, shell=True)
+        #subprocess.call('rm '+model_path_UNET, shell=True)
     else:
         network.save_weights(model_path, save_prec, None)
 
