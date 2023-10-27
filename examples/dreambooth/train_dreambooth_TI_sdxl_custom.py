@@ -28,6 +28,7 @@ from tqdm import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
 from lora_sdxl_TI import *
+from train_util import get_optimizer
 
 logger = get_logger(__name__)
 
@@ -328,7 +329,20 @@ def parse_args():
         default=20000,        
         help="Network alpha",
     )    
+    parser.add_argument(
+        "--optimizer_type",
+        type=str,
+        default=None,
+        help="Which optimizer, None if AdamW8bit, Prodigy",
+    )    
 
+    parser.add_argument(
+        "--optimizer_args",
+        type=str,
+        default=None,
+        nargs="*",
+        help='additional arguments for optimizer (like "weight_decay=0.01 betas=0.9,0.999 ...") / オプティマイザの追加引数（例： "weight_decay=0.01 betas=0.9,0.999 ..."）',
+    )
 
     parser.add_argument(
         "--placeholder_token_at_data",
@@ -344,6 +358,8 @@ def parse_args():
         default=None,
         help="Append text to caption",
     )    
+
+
 
 
     parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
@@ -671,18 +687,22 @@ def main():
         args.learning_rate = (
             args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
         )
-
-    optimizer_class = bnb.optim.AdamW8bit
-
-    params_to_optimize = trainable_params
     
-    optimizer = optimizer_class(
-        params_to_optimize,
-        lr=args.learning_rate,
-        betas=(args.adam_beta1, args.adam_beta2),
-        weight_decay=args.adam_weight_decay,
-        eps=args.adam_epsilon,
-    )
+    
+    if args.optimizer_type == "Prodigy".lower():
+        optimizer_name, optimizer_args, optimizer = get_optimizer(args, trainable_params)
+    else:
+        optimizer_class = bnb.optim.AdamW8bit
+
+        params_to_optimize = trainable_params
+        
+        optimizer = optimizer_class(
+            params_to_optimize,
+            lr=args.learning_rate,
+            betas=(args.adam_beta1, args.adam_beta2),
+            weight_decay=args.adam_weight_decay,
+            eps=args.adam_epsilon,
+        )
 
     #noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler", use_auth_token=True)
     noise_scheduler = PNDMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler", use_auth_token=True)

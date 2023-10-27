@@ -32,6 +32,7 @@ from transformers import CLIPTextModel, CLIPTokenizer, CLIPTextConfig, CLIPTextM
 
 import lora_sdxl_TI
 from lora_sdxl import *
+from train_util import get_optimizer
 
 logger = get_logger(__name__)
 
@@ -492,7 +493,7 @@ def parse_args():
     
     return args
 
-
+"""
 def get_optimizer(args, trainable_params):
 
     optimizer_type = args.optimizer_type
@@ -546,7 +547,7 @@ def get_optimizer(args, trainable_params):
     optimizer_args = ",".join([f"{k}={v}" for k, v in optimizer_kwargs.items()])
 
     return optimizer_name, optimizer_args, optimizer
-
+"""
 
 
 class DreamBoothDataset(Dataset):
@@ -905,15 +906,19 @@ def main():
             args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
         )
 
-    optimizer_class = bnb.optim.AdamW8bit
 
-    optimizer = optimizer_class(
-        trainable_params,
-        lr=args.learning_rate,
-        betas=(args.adam_beta1, args.adam_beta2),
-        weight_decay=args.adam_weight_decay,
-        eps=args.adam_epsilon,
-    )
+    if args.optimizer_type == "Prodigy".lower():
+        optimizer_name, optimizer_args, optimizer = get_optimizer(args, trainable_params)
+    else:
+        optimizer_class = bnb.optim.AdamW8bit
+
+        optimizer = optimizer_class(
+            trainable_params,
+            lr=args.learning_rate,
+            betas=(args.adam_beta1, args.adam_beta2),
+            weight_decay=args.adam_weight_decay,
+            eps=args.adam_epsilon,
+        )
 
 
 
