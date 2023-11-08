@@ -845,7 +845,7 @@ def main():
     """
     text_encoder_one, text_encoder_two, network, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         text_encoder_one, text_encoder_two, network, optimizer, train_dataloader, lr_scheduler)
-    """
+    """ ###
     text_encoder, network, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         text_encoder, network, optimizer, train_dataloader, lr_scheduler)
     text_encoders = [text_encoder]
