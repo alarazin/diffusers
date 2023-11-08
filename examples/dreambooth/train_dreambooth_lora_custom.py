@@ -844,7 +844,7 @@ def main():
     ).to("cuda")
 
     """
-    tokenizer = CLIPTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer").to('cuda')
+    tokenizer = CLIPTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer")
     text_encoder = CLIPTextModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder").to('cuda')
 
 
@@ -892,7 +892,7 @@ def main():
 
     tokenizers = [tokenizer]
     text_encoders = [text_encoder]    
-    
+
     if os.path.exists(model_path_TI):    
         for weights_file in [model_path_TI]:
             if ";" in weights_file:
