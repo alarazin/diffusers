@@ -649,8 +649,15 @@ class DreamBoothDataset(Dataset):
 
         print(instance_prompt)
         example["instance_images"] = self.image_transforms(instance_image)
-        with torch.no_grad():
-            example["instance_prompt_ids"], example["instance_added_cond_kwargs"]= compute_embeddings(height, width, instance_prompt, self.text_encoders, self.tokenizers)
+        #with torch.no_grad():
+            #example["instance_prompt_ids"], example["instance_added_cond_kwargs"]= compute_embeddings(height, width, instance_prompt, self.text_encoders, self.tokenizers)
+
+        example["instance_prompt_ids"]=self.tokenizers[0](
+            instance_prompt,
+            padding="do_not_pad",
+            truncation=True,
+            max_length=self.tokenizer.model_max_length,
+        ).input_ids
 
         return example
 
@@ -728,7 +735,6 @@ def collate_fn(examples):
     batch = {
         "input_ids": input_ids,
         "pixel_values": pixel_values,
-        "unet_added_conditions": {"text_embeds": add_text_embeds, "time_ids": add_time_ids},
     }
 
     return batch
@@ -756,16 +762,16 @@ def compute_embeddings(height, width, prompt, text_encoders, tokenizers):
     
     
 class LatentsDataset(Dataset):
-    def __init__(self, latents_cache, text_encoder_cache, cond_cache):
+    def __init__(self, latents_cache, text_encoder_cache)#, cond_cache):
         self.latents_cache = latents_cache
         self.text_encoder_cache = text_encoder_cache
-        self.cond_cache = cond_cache
+        #self.cond_cache = cond_cache
 
     def __len__(self):
         return len(self.latents_cache)
 
     def __getitem__(self, index):
-        return self.latents_cache[index], self.text_encoder_cache[index], self.cond_cache[index]
+        return self.latents_cache[index], self.text_encoder_cache[index]#, self.cond_cache[index]
     
     
 
@@ -988,15 +994,15 @@ def main():
         with torch.no_grad():
             
             batch["input_ids"] = batch["input_ids"].to(accelerator.device, non_blocking=True)
-            batch["unet_added_conditions"] = batch["unet_added_conditions"]
+            #batch["unet_added_conditions"] = batch["unet_added_conditions"]
 
             batch["pixel_values"]=(vae.encode(batch["pixel_values"].to(accelerator.device, dtype=torch.float32)).latent_dist.sample() * 0.18215)#vae.config.scaling_factor)
 
             latents_cache.append(batch["pixel_values"])
             text_encoder_cache.append(batch["input_ids"])
-            cond_cache.append(batch["unet_added_conditions"])
+            #cond_cache.append(batch["unet_added_conditions"])
 
-    train_dataset = LatentsDataset(latents_cache, text_encoder_cache, cond_cache)
+    train_dataset = LatentsDataset(latents_cache, text_encoder_cache)#, cond_cache)
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1, collate_fn=lambda x: x, shuffle=True)
 
     del vae, tokenizers, text_encoders
@@ -1061,7 +1067,7 @@ def main():
 
                 # Predict the noise residual
                 with accelerator.autocast():
-                    model_pred = unet(noisy_model_input, timesteps, batch[0][1], added_cond_kwargs=batch[0][2]).sample
+                    model_pred = unet(noisy_model_input, timesteps, batch[0][1]).sample
 
                 # Get the target for loss depending on the prediction type
                 target = noise
