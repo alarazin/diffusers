@@ -762,7 +762,7 @@ def compute_embeddings(height, width, prompt, text_encoders, tokenizers):
     
     
 class LatentsDataset(Dataset):
-    def __init__(self, latents_cache, text_encoder_cache)#, cond_cache):
+    def __init__(self, latents_cache, text_encoder_cache):#, cond_cache):
         self.latents_cache = latents_cache
         self.text_encoder_cache = text_encoder_cache
         #self.cond_cache = cond_cache
