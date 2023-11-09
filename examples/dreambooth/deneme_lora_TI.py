@@ -565,7 +565,12 @@ class DreamBoothDataset(Dataset):
         
         example["instance_images"] = self.image_transforms(instance_image)
         
-        example["instance_prompt"]=instance_prompt
+        example["instance_prompt"]=self.tokenizers[0](
+            instance_prompt,
+            padding="do_not_pad",
+            truncation=True,
+            max_length=self.tokenizer.model_max_length,
+        ).input_ids
 
         example["height"]=height
         example["width"]=width  
@@ -888,7 +893,7 @@ def main():
 
     for batch in train_dataloader:
                
-        batch["input_ids"] = batch["input_ids"]
+        batch["input_ids"] = batch["input_ids"].to(text_encoders[0].device)
         #batch["pixel_values"]=vae.encode(batch["pixel_values"].to(accelerator.device, dtype=torch.float32)).latent_dist.sample() * vae.config.scaling_factor
         
         batch["height"] = batch["height"]
