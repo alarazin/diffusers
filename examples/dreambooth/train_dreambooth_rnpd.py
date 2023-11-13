@@ -212,12 +212,6 @@ def parse_args():
         help=("The step at which the text_encoder is no longer trained"),
     )
 
-
-    parser.add_argument(
-        "--image_captions_filename",
-        action="store_true",
-        help="Get captions from filename",
-    )    
     
     
     parser.add_argument(
@@ -260,7 +254,15 @@ def parse_args():
         type=str,
         default="",     
         help="Current session directory",
-    )    
+    ) 
+    ##############################################################################################
+    ## NEW ARGS
+    # 1. CAPTION
+    parser.add_argument(
+        "--image_captions_filename",
+        action="store_true",
+        help="Get captions from filename",
+    )       
 
     parser.add_argument(
         "--external_captions",
@@ -268,6 +270,21 @@ def parse_args():
         default=False,        
         help="Use captions stored in a txt file",
     )    
+    parser.add_argument(
+        "--placeholder_token_at_data",
+        type=str,
+        default=None,
+        help="The prompt with identifier specifying the instance",
+    )
+    parser.add_argument(
+        "--append_caption",
+        type=str,
+        default=None,
+        help="Append text to caption",
+    )    
+    ##############################################################################################
+
+
     
     parser.add_argument(
         "--captions_dir",
@@ -325,6 +342,9 @@ class DreamBoothDataset(Dataset):
         class_prompt=None,
         size=512,
         center_crop=False,
+        image_captions_filename=None, 
+        external_captions = None,
+        token_map = None
     ):
         self.size = size
         self.center_crop = center_crop
@@ -362,6 +382,14 @@ class DreamBoothDataset(Dataset):
             ]
         )
 
+        ############################################################################################
+        ## ADD CAPTIONING
+        self.image_captions_filename = image_captions_filename
+        self.external_captions = external_captions
+        ############################################################################################
+        self.token_map = token_map
+      
+
     def __len__(self):
         return self._length
 
@@ -372,33 +400,41 @@ class DreamBoothDataset(Dataset):
         if not instance_image.mode == "RGB":
             instance_image = instance_image.convert("RGB")
             
+        ############################################################################################
+        ## ADD CAPTIONING
+
         instance_prompt = self.instance_prompt
-        
+
         if self.image_captions_filename:
-            filename = Path(path).stem
-            
-            pt=''.join([i for i in filename if not i.isdigit()])
+            #capt = Path(path.stem)
+            pt = str(path).split('/')[-1].split(".")[0]
+            #pt=''.join([i for i in capt if not i.isdigit()])
             pt=pt.replace("_"," ")
             pt=pt.replace("(","")
             pt=pt.replace(")","")
             pt=pt.replace("-","")
-            pt=pt.replace("conceptimagedb","")  
-            
-            if args.external_captions:
-              cptpth=os.path.join(args.captions_dir, filename+'.txt')
-              if os.path.exists(cptpth):
-                with open(cptpth, "r") as f:
-                   instance_prompt=pt+' '+f.read()
-              else:
-                instance_prompt=pt
-            else:
-                if args.Style:
-                  instance_prompt = ""
-                else:
-                  instance_prompt = pt
-            #sys.stdout.write(" [0;32m" +instance_prompt+" [0m")
-            #sys.stdout.flush()
+            pt=pt.strip()  # CHECKTHIS
 
+            instance_prompt = pt
+
+        elif self.external_captions:
+            caption_path = path.with_suffix(".txt")
+            if caption_path.exists():
+                with open(caption_path) as f:
+                    instance_prompt = f.read()
+            else:
+                print('No caption for image ', path)
+        ############################################################################################
+        ## ADD TOKEN MAP
+        if self.token_map is not None:
+            for token, value in self.token_map.items():
+                instance_prompt = instance_prompt.replace(token, value)
+
+        if args.append_caption is not None:
+            instance_prompt = args.append_caption +instance_prompt
+     
+        ############################################################################################
+        print(instance_prompt)
 
         example["instance_images"] = self.image_transforms(instance_image)
         example["instance_prompt_ids"] = self.tokenizer(
@@ -471,6 +507,26 @@ def main():
         log_with="tensorboard",
         logging_dir=logging_dir,
     )
+
+
+    ###########################################################################################
+    ## TOKEN MAP 
+    
+    if args.placeholder_token_at_data is not None:
+        if len(args.placeholder_token_at_data.split('|'))>2:
+            token_map = {}
+            p_split = args.placeholder_token_at_data.split('-')
+            for tok_match in p_split:
+                tok, pat = tok_match.split('|')
+                token_map[tok] = pat
+            
+        else:
+            tok, pat = args.placeholder_token_at_data.split("|")
+            token_map = {tok: pat}
+    else:
+        token_map = None
+    ###########################################################################################
+
 
     # Currently, it's not possible to do gradient accumulation when training two models with accelerate.accumulate
     # This will be enabled soon in accelerate. For now, we don't allow gradient accumulation when training two models.
@@ -608,6 +664,9 @@ def main():
         size=args.resolution,
         center_crop=args.center_crop,
         args=args,
+        image_captions_filename=args.image_captions_filename,
+        external_captions=args.external_captions,
+        token_map = token_map
     )
 
     def collate_fn(examples):
