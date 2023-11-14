@@ -408,7 +408,7 @@ class DreamBoothDataset(Dataset):
         if self.image_captions_filename:
             #capt = Path(path.stem)
             pt = str(path).split('/')[-1].split(".")[0]
-            #pt=''.join([i for i in capt if not i.isdigit()])
+            pt=''.join([i for i in pt if not i.isdigit()])
             pt=pt.replace("_"," ")
             pt=pt.replace("(","")
             pt=pt.replace(")","")
