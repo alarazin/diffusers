@@ -422,6 +422,7 @@ class DreamBoothDataset(Dataset):
         self.instance_prompt_hidden_states = instance_prompt_hidden_states
         self.instance_unet_added_conditions = instance_unet_added_conditions
         self.image_captions_filename = None
+        self.external_captions=None
 
         self.instance_data_root = Path(instance_data_root)
         if not self.instance_data_root.exists():
