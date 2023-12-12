@@ -572,6 +572,7 @@ class DreamBoothDataset(Dataset):
         self.tokenizers=tokenizers
         self.text_encoders=text_encoders
         self.center_crop = center_crop
+        self.instance_prompt=args.instance_prompt,
         self.instance_prompt_hidden_states = instance_prompt_hidden_states
         self.instance_unet_added_conditions = instance_unet_added_conditions
         self.image_captions_filename = None
@@ -634,6 +635,8 @@ class DreamBoothDataset(Dataset):
                     instance_prompt = f.read()
             else:
                 print('No caption for image ', path)
+        else:
+            instance_prompt=self.instance_prompt
 
         ############################################################################################
         ## ADD TOKEN MAP

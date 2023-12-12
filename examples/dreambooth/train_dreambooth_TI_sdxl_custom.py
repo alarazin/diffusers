@@ -358,6 +358,26 @@ def parse_args():
         default=None,
         help="Append text to caption",
     )    
+    
+
+    ###################################################################################################
+    ## FACE SEGMENTATION
+    ###################################################################################################
+
+    parser.add_argument(
+        "--use_face_segmentation_condition",
+        action="store_true",
+        default=False,
+        help="Offset Noise",
+    )
+    parser.add_argument(
+        "--use_mask_captioned_data",
+        action="store_true",
+        default=False,
+        help="Offset Noise",
+    )
+
+    ###################################################################################################
 
 
 
@@ -392,13 +412,13 @@ class DreamBoothDataset(Dataset):
         center_crop=False,
         instance_prompt_hidden_states=None,
         instance_unet_added_conditions=None,
-        token_map=None    
+        token_map=None
     ):
         self.size = size
         self.tokenizers=tokenizers
         self.text_encoders=text_encoders
         self.center_crop = center_crop
-        self.instance_prompt=None,
+        self.instance_prompt=args.instance_prompt,
         self.instance_prompt_hidden_states = instance_prompt_hidden_states
         self.instance_unet_added_conditions = instance_unet_added_conditions
         self.image_captions_filename = None
@@ -408,6 +428,50 @@ class DreamBoothDataset(Dataset):
             raise ValueError("Instance images root doesn't exists.")
 
         self.instance_images_path = list(Path(instance_data_root).iterdir())
+        
+
+        self.use_mask = args.use_face_segmentation_condition or args.use_mask_captioned_data
+        
+        self.mask_path = []
+
+
+
+        ###################################################################################################
+        ## FACE SEGMENTATION
+
+        self.mask_path = []
+        if args.use_face_segmentation_condition:
+            for idx in range(len(self.instance_images_path)):
+                # see if the mask exists
+                targ = f"{instance_data_root}/{idx}.mask.png"
+                if not Path(targ).exists():
+                    print(f"Mask not found for {targ}")
+                    print(
+                        "Warning : this will pre-process all the images in the instance data root."
+                    )
+
+                    if len(self.mask_path) > 0:
+                        print(
+                            "Warning : masks already exists, but will be overwritten."
+                        )
+                    
+                    masks = face_mask_google_mediapipe(
+                        [
+                            Image.open(f).convert("RGB")
+                            for f in self.instance_images_path
+                        ]
+                    )                
+                    for idx, mask in enumerate(masks):
+                        mask.save(f"{instance_data_root}/{idx}.mask.png")
+
+                    break
+
+            for idx in range(len(self.instance_images_path)):
+                self.mask_path.append(f"{instance_data_root}/{idx}.mask.png")
+
+        ###################################################################################################
+
+
         self.num_instance_images = len(self.instance_images_path)
         #self.instance_prompt = instance_prompt
         self._length = self.num_instance_images
@@ -459,6 +523,8 @@ class DreamBoothDataset(Dataset):
                     instance_prompt = f.read()
             else:
                 print('No caption for image ', path)
+        else:
+            instance_prompt = self.instance_prompt
 
         ############################################################################################
         ## ADD TOKEN MAP
@@ -470,6 +536,21 @@ class DreamBoothDataset(Dataset):
         if self.append_text is not None:
             instance_prompt = self.append_text+instance_prompt
         ############################################################################################
+        
+
+        ###################################################################################################
+        ## FACE SEGMENTATION
+        if self.use_mask:
+            example["mask"] = (
+                self.image_transforms(
+                    Image.open(self.mask_path[index % self.num_instance_images])
+                )
+                * 0.5
+                + 1.0
+            )
+        ###################################################################################################
+
+
         instance_prompt = ''.join([i for i in instance_prompt if not i.isdigit()])
         print(instance_prompt)
         
@@ -552,6 +633,8 @@ def collate_fn(examples, args):
 
     width = [example["width"] for example in examples]
 
+    
+
     pixel_values = torch.stack(pixel_values)
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
@@ -563,6 +646,10 @@ def collate_fn(examples, args):
         "width":width
         }
         
+
+    if examples[0].get("mask", None) is not None:
+            batch["mask"] = torch.stack([example["mask"] for example in examples])
+
     return batch
 
 def compute_embeddings(height, width, prompt, text_encoders, tokenizers):
@@ -588,18 +675,19 @@ def compute_embeddings(height, width, prompt, text_encoders, tokenizers):
     
     
 class LatentsDataset(Dataset):
-    def __init__(self, latents_cache, text_encoder_cache, cond_cache, height_cache, width_cache):
+    def __init__(self, latents_cache, text_encoder_cache, cond_cache, height_cache, width_cache, mask_cache):
         self.latents_cache = latents_cache
         self.text_encoder_cache = text_encoder_cache
         self.cond_cache = cond_cache
         self.height_cache = height_cache
         self.width_cache = width_cache
+        self.mask_cache = mask_cache
 
     def __len__(self):
         return len(self.latents_cache)
 
     def __getitem__(self, index):
-        return self.latents_cache[index], self.text_encoder_cache[index], self.cond_cache[index], self.height_cache[index], self.width_cache[index]
+        return self.latents_cache[index], self.text_encoder_cache[index], self.cond_cache[index], self.height_cache[index], self.width_cache[index], self.mask_cache
 
 
 def main():
@@ -772,6 +860,7 @@ def main():
 
     height_cache=[]
     width_cache=[]
+    mask_cache = []
 
     for batch in train_dataloader:
                
@@ -783,6 +872,17 @@ def main():
 
         batch["pixel_values"]=vae.encode(batch["pixel_values"].to(accelerator.device, dtype=torch.float32, non_blocking=True)).latent_dist.sample() * vae.config.scaling_factor
 
+        if batch.get("mask", None) is not None:
+            mask = batch["mask"].to(accelerator.device, dtype=torch.float32, non_blocking=True)
+            mask = F.interpolate(mask, size = (batch["pixel_values"].shape[-2],batch["pixel_values"].shape[-1]), mode = "nearest")
+            mask = mask.repeat(1, batch["pixel_values"].shape[1], 1, 1)
+
+            assert len(mask.shape) == 4 and len(batch["pixel_values"].shape) == 4
+            
+            batch["mask"] = mask
+            mask_cache.append(batch["mask"])
+
+
 
 
         latents_cache.append(batch["pixel_values"])
@@ -791,9 +891,8 @@ def main():
 
         height_cache.append(batch["height"])
         width_cache.append(batch["width"])
-
     #train_dataset = LatentsDataset(latents_cache, text_encoder_cache, cond_cache)
-    train_dataset = LatentsDataset(latents_cache, text_encoder_cache, cond_cache, height_cache, width_cache)
+    train_dataset = LatentsDataset(latents_cache, text_encoder_cache, cond_cache, height_cache, width_cache, mask_cache)
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1, collate_fn=lambda x: x, shuffle=True)
 
     del vae
